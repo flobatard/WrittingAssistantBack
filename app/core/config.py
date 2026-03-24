@@ -8,8 +8,8 @@ class Settings(BaseSettings):
     # Application
     APP_ENV: str = "development"
 
-    # Base de données SQL
-    DATABASE_URL: str = "sqlite+aiosqlite:///./writing_assistant.db"
+    # Base de données SQL (PostgreSQL via asyncpg)
+    DATABASE_URL: str = "postgresql+asyncpg://writing_user:writing_password@localhost:5430/writing_assistant"
 
     # ChromaDB
     CHROMA_PERSIST_DIR: str = "./chroma_data"
