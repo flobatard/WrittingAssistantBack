@@ -27,7 +27,7 @@ def vectorize_book(book: Book, embedding_config: EmbeddingConfig) -> dict:
     collection_name = _normalize_collection_name(raw_collection_name)
 
     # 1. Découpage Markdown
-    splitter = MarkdownTextSplitter(chunk_size=500, chunk_overlap=50)
+    splitter = MarkdownTextSplitter(chunk_size=5000, chunk_overlap=500)
     chunks = splitter.split_text(book.content)
 
     # 2.
@@ -54,13 +54,16 @@ def vectorize_book(book: Book, embedding_config: EmbeddingConfig) -> dict:
         if col.name.startswith(prefix) and col.name != collection_name:
             client.delete_collection(col.name)
 
-    # 5. Insert
+    # 5. Insert in batches to respect ChromaDB's max batch size
+    BATCH_SIZE = 5000
     if chunks:
-        vectordb.add_texts(
-            texts=chunks,
-            metadatas=[{"book_id": book.id, "chunk_index": i} for i in range(len(chunks))],
-            ids=[f"{book.id}_chunk_{i}" for i in range(len(chunks))],
-        )
+        for start in range(0, len(chunks), BATCH_SIZE):
+            end = start + BATCH_SIZE
+            vectordb.add_texts(
+                texts=chunks[start:end],
+                metadatas=[{"book_id": book.id, "chunk_index": i} for i in range(start, min(end, len(chunks)))],
+                ids=[f"{book.id}_chunk_{i}" for i in range(start, min(end, len(chunks)))],
+            )
 
     return {
         "collection_name": collection_name,
