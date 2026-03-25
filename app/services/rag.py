@@ -66,3 +66,37 @@ def vectorize_book(book: Book, embedding_config: EmbeddingConfig) -> dict:
         "collection_name": collection_name,
         "chunks_count": len(chunks),
     }
+
+
+def query_book(book: Book, query: str, embedding_config: EmbeddingConfig, k: int = 5) -> dict:
+    """
+    Recherche les chunks les plus pertinents pour une question donnée.
+
+    Returns:
+        dict avec 'query', 'results' (liste de chunks avec score et metadata).
+    """
+    model_name = embedding_config.model
+    raw_collection_name = f"book_{book.id}_{model_name}"
+    collection_name = _normalize_collection_name(raw_collection_name)
+
+    embeddings = get_embeddings(embedding_config)
+
+    vectordb = Chroma(
+        collection_name=collection_name,
+        embedding_function=embeddings,
+        client=get_chroma_client(),
+    )
+
+    results = vectordb.similarity_search_with_score(query, k=k)
+
+    return {
+        "query": query,
+        "results": [
+            {
+                "content": doc.page_content,
+                "score": score,
+                "metadata": doc.metadata,
+            }
+            for doc, score in results
+        ],
+    }

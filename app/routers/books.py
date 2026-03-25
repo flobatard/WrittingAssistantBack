@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.models.book import Book
 from app.schemas.book import BookCreate, BookRead, BookUpdate
-from app.services.rag import vectorize_book
+from app.services.rag import vectorize_book, query_book
 
 from app.core.dependancies import get_embedding_config, EmbeddingConfig
 
@@ -76,3 +76,17 @@ async def vectorize(
     await db.flush()
 
     return result
+
+
+@router.get("/{book_id}/query")
+async def query(
+        book_id: int,
+        q: str,
+        k: int = 5,
+        embedding_config: EmbeddingConfig = Depends(get_embedding_config),
+        db: AsyncSession = Depends(get_db)):
+    book = await db.get(Book, book_id)
+    if not book:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found")
+
+    return query_book(book, q, embedding_config, k=k)
