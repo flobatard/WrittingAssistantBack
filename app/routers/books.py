@@ -7,6 +7,8 @@ from app.models.book import Book
 from app.schemas.book import BookCreate, BookRead, BookUpdate
 from app.services.rag import vectorize_book
 
+from app.core.dependancies import get_embedding_config, EmbeddingConfig
+
 router = APIRouter(tags=["books"])
 
 
@@ -59,12 +61,15 @@ async def delete_book(book_id: int, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/{book_id}/vectorize")
-async def vectorize(book_id: int, db: AsyncSession = Depends(get_db)):
+async def vectorize(
+        book_id: int, 
+        embedding_config: EmbeddingConfig = Depends(get_embedding_config),
+        db: AsyncSession = Depends(get_db)):
     book = await db.get(Book, book_id)
     if not book:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found")
 
-    result = vectorize_book(book)
+    result = vectorize_book(book, embedding_config)
 
     # Mémorise le modèle utilisé
     book.embedding_model_used = result["collection_name"].split("_", 2)[-1] if "_" in result["collection_name"] else None

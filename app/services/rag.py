@@ -2,9 +2,13 @@ import re
 
 import chromadb
 from langchain_text_splitters import MarkdownTextSplitter
+from langchain_community.vectorstores import Chroma
+from app.services.embeddings_factory import get_embeddings
 
 from app.core.config import get_settings
 from app.models.book import Book
+
+from app.core.dependancies import EmbeddingConfig
 
 settings = get_settings()
 
@@ -14,7 +18,7 @@ def _normalize_collection_name(name: str) -> str:
     return re.sub(r"[^a-zA-Z0-9_]", "_", name)
 
 
-def vectorize_book(book: Book) -> dict:
+def vectorize_book(book: Book, embedding_config: EmbeddingConfig) -> dict:
     """
     Découpe le contenu Markdown du livre en chunks et les indexe dans ChromaDB.
 
@@ -29,17 +33,33 @@ def vectorize_book(book: Book) -> dict:
     splitter = MarkdownTextSplitter(chunk_size=500, chunk_overlap=50)
     chunks = splitter.split_text(book.content)
 
-    # 2. Initialisation ChromaDB
-    client = chromadb.PersistentClient(path=settings.CHROMA_PERSIST_DIR)
-    collection = client.get_or_create_collection(name=collection_name)
+    # 2. 
+    embeddings = get_embeddings(embedding_config)
 
-    # 3. Ajout des chunks (écrase les éventuels anciens documents)
+    # 3.
+    vectordb = Chroma(
+        collection_name=collection_name,
+        embedding_function=embeddings,
+        persist_directory=settings.CHROMA_PERSIST_DIR,
+    )
+
+    # 5.
+    vectordb.delete_collection()
+    vectordb = Chroma(
+        collection_name=collection_name,
+        embedding_function=embeddings,
+        persist_directory=settings.CHROMA_PERSIST_DIR,
+    )
+
+    # 5. Insert
     if chunks:
-        collection.upsert(
-            ids=[f"{book.id}_chunk_{i}" for i in range(len(chunks))],
-            documents=chunks,
+        vectordb.add_texts(
+            texts=chunks,
             metadatas=[{"book_id": book.id, "chunk_index": i} for i in range(len(chunks))],
+            ids=[f"{book.id}_chunk_{i}" for i in range(len(chunks))],
         )
+
+    vectordb.persist()
 
     return {
         "collection_name": collection_name,
