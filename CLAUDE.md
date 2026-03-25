@@ -2,6 +2,10 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Project overview
+
+FastAPI backend for an AI-powered creative writing assistant (Scrivener-like). Users write their book in Markdown; content is persisted in PostgreSQL and vectorized in ChromaDB to power a RAG system that can answer questions about the story.
+
 ## Commands
 
 ### Running the API
@@ -25,14 +29,35 @@ pip install -r requirements.txt
 
 ## Architecture
 
-FastAPI backend for a RAG-powered writing assistant. Two storage layers:
-- **PostgreSQL** (via SQLAlchemy async + asyncpg): stores books with their Markdown content
-- **ChromaDB** (`./chroma_data/`): vector store for semantic search over book chunks
+Two storage layers:
+- **PostgreSQL** (via SQLAlchemy async + asyncpg): persists books with their raw Markdown content
+- **ChromaDB** (`./chroma_data/`): local vector store for semantic search over book chunks
+
+### Project structure
+
+```
+app/
+├── main.py              # FastAPI app entry point — lifespan hook calls init_db()
+├── core/
+│   ├── config.py        # Pydantic Settings — reads from .env via lru_cache
+│   └── database.py      # Async SQLAlchemy engine, Base, get_db() dependency
+├── models/
+│   └── book.py          # Book ORM model (table: books)
+├── schemas/
+│   └── book.py          # Pydantic schemas: BookCreate, BookUpdate, BookRead
+├── routers/
+│   └── books.py         # All endpoints: CRUD + POST /{id}/vectorize
+└── services/
+    └── rag.py           # vectorize_book() — Markdown chunking + ChromaDB ingestion
+```
 
 ### Request flow
 
 1. Books are created/updated via CRUD endpoints (`/books/`)
-2. `POST /books/{id}/vectorize` triggers RAG ingestion: Markdown content is split into chunks (size=500, overlap=50) via `MarkdownTextSplitter`, then stored in a ChromaDB collection named `book_{id}_{embedding_model}`
+2. `POST /books/{id}/vectorize` triggers RAG ingestion:
+   - Markdown content is split into chunks (size=500, overlap=50) via `MarkdownTextSplitter`
+   - Chunks are upserted into a ChromaDB collection named `book_{id}_{embedding_model}` (special chars normalized to underscores)
+   - `book.embedding_model_used` is updated on the ORM object
 3. Each ChromaDB collection is scoped per book + embedding model combination
 
 ### Key modules
@@ -49,15 +74,19 @@ FastAPI backend for a RAG-powered writing assistant. Two storage layers:
 
 No Alembic — tables are auto-created at startup via `Base.metadata.create_all()`. Schema changes require dropping and recreating tables in development.
 
-PostgreSQL connection: `postgresql+asyncpg://writing_user:writing_password@localhost:5430/writing_assistant`
+PostgreSQL connection (default): `postgresql+asyncpg://writing_user:writing_password@localhost:5430/writing_assistant`
 
 ### Environment variables
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `DATABASE_URL` | `postgresql+asyncpg://...@localhost:5430/writing_assistant` | PostgreSQL connection string |
+| `DATABASE_URL` | `postgresql+asyncpg://writing_user:writing_password@localhost:5430/writing_assistant` | PostgreSQL connection string |
 | `CHROMA_PERSIST_DIR` | `./chroma_data` | ChromaDB persistence path |
 | `EMBEDDING_MODEL_NAME` | `sentence-transformers/all-MiniLM-L6-v2` | HuggingFace embedding model |
 | `APP_ENV` | `development` | Application environment |
 
 Copy `.env.example` to `.env` to configure locally.
+
+### ChromaDB collection naming
+
+Collection names follow the pattern `book_{id}_{model_name}` with all non-alphanumeric characters (including `/` and `-`) replaced by `_`. This normalization is handled by `_normalize_collection_name()` in [app/services/rag.py](app/services/rag.py).
