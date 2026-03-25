@@ -29,6 +29,9 @@ WrittingAssistantBack/
 │   │   └── books.py         # Endpoints CRUD + vectorisation
 │   └── services/
 │       └── rag.py           # vectorize_book() — chunking + ingestion ChromaDB
+├── migrations/              # Scripts de migration Alembic
+│   ├── env.py               # Configuration Alembic (async + création DB auto)
+│   └── versions/            # Fichiers de migration générés
 ├── chroma_data/             # Données ChromaDB (gitignorées)
 ├── docker-compose.yml       # PostgreSQL + API conteneurisés
 ├── requirements.txt
@@ -46,7 +49,9 @@ WrittingAssistantBack/
 
 ```bash
 cp .env.example .env
-docker-compose up --build
+docker-compose up -d db      # Démarrer PostgreSQL
+alembic upgrade head        # Appliquer les migrations
+docker-compose up --build    # Démarrer l'API
 ```
 
 L'API est disponible sur `http://localhost:8000`.
@@ -62,6 +67,7 @@ pip install -r requirements.txt
 cp .env.example .env
 # Éditer .env avec les coordonnées PostgreSQL
 
+alembic upgrade head         # Créer la DB + appliquer les migrations
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
@@ -127,4 +133,12 @@ Chaque collection ChromaDB est isolée par combinaison livre + modèle d'embeddi
 
 ## Base de données
 
-Pas d'Alembic — les tables sont créées automatiquement au démarrage via `Base.metadata.create_all()`. En développement, un changement de schéma nécessite de recréer les tables manuellement.
+Gérée par **Alembic**. Les tables ne sont jamais créées automatiquement au démarrage.
+
+```bash
+# Appliquer toutes les migrations
+alembic upgrade head
+
+# Générer une nouvelle migration après modification d'un modèle
+alembic revision --autogenerate -m "description"
+```

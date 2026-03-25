@@ -62,17 +62,26 @@ app/
 
 ### Key modules
 
-- [app/main.py](app/main.py) — FastAPI app with lifespan hook that auto-creates DB tables on startup (`init_db()`)
+- [app/main.py](app/main.py) — FastAPI app entry point (lifespan + routers)
 - [app/core/config.py](app/core/config.py) — Pydantic Settings config (reads from `.env`)
 - [app/core/database.py](app/core/database.py) — Async SQLAlchemy engine and session dependency
 - [app/models/book.py](app/models/book.py) — `Book` ORM model (PostgreSQL)
 - [app/schemas/book.py](app/schemas/book.py) — Pydantic request/response schemas
 - [app/routers/books.py](app/routers/books.py) — All API endpoints
 - [app/services/rag.py](app/services/rag.py) — `vectorize_book()` — chunking + ChromaDB ingestion
+- [migrations/](migrations/) — Alembic migration scripts
 
 ### Database
 
-No Alembic — tables are auto-created at startup via `Base.metadata.create_all()`. Schema changes require dropping and recreating tables in development.
+Managed by **Alembic**. Tables are never auto-created at startup.
+
+```bash
+# Apply all migrations
+alembic upgrade head
+
+# Generate a new migration after modifying a model
+alembic revision --autogenerate -m "description"
+```
 
 PostgreSQL connection (default): `postgresql+asyncpg://writing_user:writing_password@localhost:5430/writing_assistant`
 
