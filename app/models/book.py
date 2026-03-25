@@ -12,6 +12,7 @@ class Book(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
     title: Mapped[str] = mapped_column(String(255), nullable=False)
+    genre: Mapped[str] = mapped_column(String(255))
     content: Mapped[str] = mapped_column(Text, nullable=False)
     embedding_model_used: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
