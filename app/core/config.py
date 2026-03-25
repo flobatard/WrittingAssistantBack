@@ -17,9 +17,6 @@ class Settings(BaseSettings):
     # ChromaDB
     CHROMA_PERSIST_DIR: str = "./chroma_data"
 
-    # Embeddings
-    EMBEDDING_MODEL_NAME: str = "sentence-transformers/all-MiniLM-L6-v2"
-
 
 @lru_cache
 def get_settings() -> Settings:

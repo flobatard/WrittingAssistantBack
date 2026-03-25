@@ -102,7 +102,6 @@ All scripts read connection info from `DATABASE_URL` (via `app.core.config`).
 |---|---|---|
 | `DATABASE_URL` | `postgresql+asyncpg://writing_user:writing_password@localhost:5430/writing_assistant` | PostgreSQL connection string |
 | `CHROMA_PERSIST_DIR` | `./chroma_data` | ChromaDB persistence path |
-| `EMBEDDING_MODEL_NAME` | `sentence-transformers/all-MiniLM-L6-v2` | HuggingFace embedding model |
 | `APP_ENV` | `development` | Application environment |
 
 Copy `.env.example` to `.env` to configure locally.

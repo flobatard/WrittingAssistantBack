@@ -25,7 +25,7 @@ def vectorize_book(book: Book, embedding_config: EmbeddingConfig) -> dict:
     Returns:
         dict avec 'collection_name' et 'chunks_count'.
     """
-    model_name = book.embedding_model_used or settings.EMBEDDING_MODEL_NAME
+    model_name = embedding_config.model
     raw_collection_name = f"book_{book.id}_{model_name}"
     collection_name = _normalize_collection_name(raw_collection_name)
 
@@ -33,22 +33,23 @@ def vectorize_book(book: Book, embedding_config: EmbeddingConfig) -> dict:
     splitter = MarkdownTextSplitter(chunk_size=500, chunk_overlap=50)
     chunks = splitter.split_text(book.content)
 
-    # 2. 
+    # 2.
     embeddings = get_embeddings(embedding_config)
 
-    # 3.
-    vectordb = Chroma(
-        collection_name=collection_name,
-        embedding_function=embeddings,
-        persist_directory=settings.CHROMA_PERSIST_DIR,
-    )
+    # 3. Client partagé — évite deux instances qui ne se coordonnent pas sur les fichiers disque
+    client = chromadb.PersistentClient(path=settings.CHROMA_PERSIST_DIR)
+
+    # 4. Supprimer toutes les collections existantes pour ce livre (tous modèles confondus)
+    prefix = _normalize_collection_name(f"book_{book.id}_")
+    for col in client.list_collections():
+        if col.name.startswith(prefix):
+            client.delete_collection(col.name)
 
     # 5.
-    vectordb.delete_collection()
     vectordb = Chroma(
         collection_name=collection_name,
         embedding_function=embeddings,
-        persist_directory=settings.CHROMA_PERSIST_DIR,
+        client=client,
     )
 
     # 5. Insert

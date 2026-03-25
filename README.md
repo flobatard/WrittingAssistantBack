@@ -79,7 +79,6 @@ Copier `.env.example` en `.env` et adapter les valeurs :
 |---|---|---|
 | `DATABASE_URL` | `postgresql+asyncpg://writing_user:writing_password@localhost:5430/writing_assistant` | Connexion PostgreSQL |
 | `CHROMA_PERSIST_DIR` | `./chroma_data` | Dossier de persistance ChromaDB |
-| `EMBEDDING_MODEL_NAME` | `sentence-transformers/all-MiniLM-L6-v2` | Modèle d'embedding HuggingFace |
 | `APP_ENV` | `development` | Environnement applicatif |
 
 ## Endpoints
