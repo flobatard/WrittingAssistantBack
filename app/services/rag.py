@@ -2,7 +2,7 @@ import re
 
 import chromadb
 from langchain_text_splitters import MarkdownTextSplitter
-from langchain_community.vectorstores import Chroma
+from langchain_chroma import Chroma
 from app.services.embeddings_factory import get_embeddings
 
 from app.core.config import get_settings
