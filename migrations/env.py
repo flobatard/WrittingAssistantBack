@@ -7,6 +7,7 @@ from sqlalchemy import pool
 from sqlalchemy.ext.asyncio import async_engine_from_config # [NOUVEAU] pour asyncpg
 from alembic import context
 
+from app.core.database import Base
 import app.models
 
 # [NOUVEAU] Charger les variables d'environnement depuis le fichier .env
