@@ -38,7 +38,6 @@ def vectorize_book(book: Book, embedding_config: EmbeddingConfig) -> dict:
 
     # 4. Supprimer toutes les collections existantes pour ce livre (tous modèles confondus)
     prefix = _normalize_collection_name(f"book_{book.id}_")
-    print(client.list_collections())
     for col in client.list_collections():
         if col.name.startswith(prefix):
             client.delete_collection(col.name)
