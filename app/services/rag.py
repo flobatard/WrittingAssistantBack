@@ -33,21 +33,17 @@ def vectorize_book(book: Book, embedding_config: EmbeddingConfig) -> dict:
     # 2.
     embeddings = get_embeddings(embedding_config)
 
-    # 3. Client partagé — évite deux instances qui ne se coordonnent pas sur les fichiers disque
-    client = get_chroma_client()
-
-    # 4. Supprimer toutes les collections existantes pour ce livre (tous modèles confondus)
-    prefix = _normalize_collection_name(f"book_{book.id}_")
-    for col in client.list_collections():
-        if col.name.startswith(prefix):
-            client.delete_collection(col.name)
-
-    # 5.
+    # 3. Get or create the collection — UUID stays stable across re-vectorizations
     vectordb = Chroma(
         collection_name=collection_name,
         embedding_function=embeddings,
-        client=client,
+        client=get_chroma_client(),
     )
+
+    # 4. Remove existing documents for this book before re-inserting
+    existing = vectordb.get(where={"book_id": book.id})
+    if existing["ids"]:
+        vectordb.delete(ids=existing["ids"])
 
     # 5. Insert
     if chunks:
