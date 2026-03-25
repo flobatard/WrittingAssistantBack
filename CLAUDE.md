@@ -85,6 +85,17 @@ alembic revision --autogenerate -m "description"
 
 PostgreSQL connection (default): `postgresql+asyncpg://writing_user:writing_password@localhost:5430/writing_assistant`
 
+### Scripts
+
+| Script | Description |
+|---|---|
+| `bash scripts/init.sh` | Create the database (if not exists) then run `alembic upgrade head` |
+| `bash scripts/drop.sh` | Drop the database (asks for confirmation) |
+| `python scripts/init_db.py` | Create the database only |
+| `python scripts/drop_db.py` | Drop the database only |
+
+All scripts read connection info from `DATABASE_URL` (via `app.core.config`).
+
 ### Environment variables
 
 | Variable | Default | Purpose |

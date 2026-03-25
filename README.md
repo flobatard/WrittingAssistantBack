@@ -50,7 +50,7 @@ WrittingAssistantBack/
 ```bash
 cp .env.example .env
 docker-compose up -d db      # Démarrer PostgreSQL
-alembic upgrade head        # Appliquer les migrations
+bash scripts/init.sh         # Créer la DB + appliquer les migrations
 docker-compose up --build    # Démarrer l'API
 ```
 
@@ -67,7 +67,7 @@ pip install -r requirements.txt
 cp .env.example .env
 # Éditer .env avec les coordonnées PostgreSQL
 
-alembic upgrade head         # Créer la DB + appliquer les migrations
+bash scripts/init.sh         # Créer la DB + appliquer les migrations
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
@@ -142,3 +142,14 @@ alembic upgrade head
 # Générer une nouvelle migration après modification d'un modèle
 alembic revision --autogenerate -m "description"
 ```
+
+## Scripts
+
+| Script | Description |
+|---|---|
+| `bash scripts/init.sh` | Crée la base (si absente) puis applique `alembic upgrade head` |
+| `bash scripts/drop.sh` | Supprime la base (demande confirmation) |
+| `python scripts/init_db.py` | Crée la base uniquement |
+| `python scripts/drop_db.py` | Supprime la base uniquement |
+
+Tous les scripts lisent la configuration depuis `DATABASE_URL` (via `app.core.config`).
