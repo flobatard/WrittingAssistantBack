@@ -1,6 +1,6 @@
 import re
 
-from langchain_text_splitters import MarkdownTextSplitter
+from langchain_text_splitters import MarkdownTextSplitter, MarkdownHeaderTextSplitter, RecursiveCharacterTextSplitter
 from langchain_chroma import Chroma
 from app.services.embeddings_factory import get_embeddings
 
@@ -27,8 +27,15 @@ def vectorize_book(book: Book, embedding_config: EmbeddingConfig) -> dict:
     collection_name = _normalize_collection_name(raw_collection_name)
 
     # 1. Découpage Markdown
-    splitter = MarkdownTextSplitter(chunk_size=5000, chunk_overlap=500)
-    chunks = splitter.split_text(book.content)
+    markdown_splitter = MarkdownHeaderTextSplitter(chunk_size=1500, chunk_overlap=200)
+    md_header_splits = markdown_splitter.split_text(book.content)
+
+    # 2. Ensuite, on sous-découpe les chapitres trop longs avec un splitter classique
+    text_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=1500, 
+        chunk_overlap=200
+    )
+    chunks = text_splitter.split_documents(md_header_splits)
 
     # 2.
     embeddings = get_embeddings(embedding_config)
