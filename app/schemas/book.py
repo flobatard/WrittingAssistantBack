@@ -26,3 +26,21 @@ class BookRead(BaseModel):
     embedding_model_used: Optional[str]
     created_at: datetime
     updated_at: datetime
+
+
+class ChatRequest(BaseModel):
+    question: str
+    k: int = 5
+    stream: bool = False
+
+
+class ChatSource(BaseModel):
+    content: str
+    score: float
+    chunk_index: int
+
+
+class ChatResponse(BaseModel):
+    question: str
+    answer: str
+    sources: list[ChatSource]

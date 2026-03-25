@@ -1,13 +1,17 @@
+import asyncio
+
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.models.book import Book
-from app.schemas.book import BookCreate, BookRead, BookUpdate
+from app.schemas.book import BookCreate, BookRead, BookUpdate, ChatRequest, ChatResponse
 from app.services.rag import vectorize_book, query_book
+from app.services.chat import chat_with_book, stream_chat_with_book
 
-from app.core.dependancies import get_embedding_config, EmbeddingConfig
+from app.core.dependancies import get_embedding_config, EmbeddingConfig, get_chat_config, ChatConfig
 
 router = APIRouter(tags=["books"])
 
@@ -90,3 +94,27 @@ async def query(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found")
 
     return query_book(book, q, embedding_config, k=k)
+
+
+@router.post("/{book_id}/chat")
+async def chat(
+        book_id: int,
+        payload: ChatRequest,
+        chat_config: ChatConfig = Depends(get_chat_config),
+        embedding_config: EmbeddingConfig = Depends(get_embedding_config),
+        db: AsyncSession = Depends(get_db)):
+    book = await db.get(Book, book_id)
+    if not book:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found")
+    if not book.embedding_model_used:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Book not vectorized yet. Call POST /books/{id}/vectorize first.")
+
+    if payload.stream:
+        return StreamingResponse(
+            stream_chat_with_book(book, payload.question, payload.k, chat_config, embedding_config),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
+
+    result = await asyncio.to_thread(chat_with_book, book, payload.question, payload.k, chat_config, embedding_config)
+    return ChatResponse(**result)
