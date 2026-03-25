@@ -59,8 +59,6 @@ def vectorize_book(book: Book, embedding_config: EmbeddingConfig) -> dict:
             ids=[f"{book.id}_chunk_{i}" for i in range(len(chunks))],
         )
 
-    vectordb.persist()
-
     return {
         "collection_name": collection_name,
         "chunks_count": len(chunks),
