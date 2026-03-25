@@ -6,7 +6,7 @@ from pydantic import BaseModel
 
 class BookCreate(BaseModel):
     title: str
-    genre: str
+    genre: Optional[str]
     content: str
 
 
@@ -22,7 +22,7 @@ class BookRead(BaseModel):
     id: int
     title: str
     content: str
-    genre: str
+    genre: Optional[str]
     embedding_model_used: Optional[str]
     created_at: datetime
     updated_at: datetime
