@@ -9,7 +9,7 @@ class Settings(BaseSettings):
     APP_ENV: str = "development"
 
     # CORS
-    CORS_ORIGINS: list[str] = ["http://localhost:3000"]
+    CORS_ORIGINS: list[str] = ["http://localhost:4200"]
 
     # Base de données SQL (PostgreSQL via asyncpg)
     DATABASE_URL: str = "postgresql+asyncpg://writing_user:writing_password@localhost:5430/writing_assistant"
