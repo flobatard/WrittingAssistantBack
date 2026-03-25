@@ -35,4 +35,5 @@ async def init_db() -> None:
     from app.models import book  # noqa: F401 — importe les modèles pour que Base les connaisse
 
     async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+        print("DB Initiated")
+        #await conn.run_sync(Base.metadata.create_all) # We don't want the creation of database to be managed 

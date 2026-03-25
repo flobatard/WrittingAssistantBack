@@ -1,16 +1,16 @@
 import os
 import asyncio
 from logging.config import fileConfig
-from dotenv import load_dotenv # [NOUVEAU]
+from urllib.parse import urlparse, urlunparse
+from dotenv import load_dotenv
 
-from sqlalchemy import pool
-from sqlalchemy.ext.asyncio import async_engine_from_config # [NOUVEAU] pour asyncpg
+from sqlalchemy import pool, text
+from sqlalchemy.ext.asyncio import async_engine_from_config, create_async_engine
 from alembic import context
 
 from app.core.database import Base
 import app.models
 
-# [NOUVEAU] Charger les variables d'environnement depuis le fichier .env
 load_dotenv()
 
 config = context.config
@@ -18,7 +18,6 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# [NOUVEAU] Écraser l'URL par défaut d'Alembic avec celle de ton .env
 database_url = os.getenv("DATABASE_URL")
 if database_url:
     config.set_main_option("sqlalchemy.url", database_url)
