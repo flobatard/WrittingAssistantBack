@@ -16,6 +16,19 @@ services:
       timeout: 5s
       retries: 5
 
+  chromadb:
+    image: chromadb/chroma:latest
+    restart: unless-stopped
+    ports:
+      - "8001:8000"
+    volumes:
+      - chroma_data:/chroma/chroma
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v2/heartbeat"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
   api:
     build: .
     restart: unless-stopped
@@ -23,11 +36,15 @@ services:
       - "8000:8000"
     env_file:
       - .env
-    volumes:
-      - ./chroma_data:/app/chroma_data
+    environment:
+      CHROMA_HOST: chromadb
+      CHROMA_PORT: 1
     depends_on:
       db:
+        condition: service_healthy
+      chromadb:
         condition: service_healthy
 
 volumes:
   postgres_data:
+  chroma_data:

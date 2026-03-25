@@ -1,16 +1,13 @@
 import re
 
-import chromadb
 from langchain_text_splitters import MarkdownTextSplitter
 from langchain_chroma import Chroma
 from app.services.embeddings_factory import get_embeddings
 
-from app.core.config import get_settings
+from app.core.config import get_chroma_client
 from app.models.book import Book
 
 from app.core.dependancies import EmbeddingConfig
-
-settings = get_settings()
 
 
 def _normalize_collection_name(name: str) -> str:
@@ -37,7 +34,7 @@ def vectorize_book(book: Book, embedding_config: EmbeddingConfig) -> dict:
     embeddings = get_embeddings(embedding_config)
 
     # 3. Client partagé — évite deux instances qui ne se coordonnent pas sur les fichiers disque
-    client = chromadb.PersistentClient(path=settings.CHROMA_PERSIST_DIR)
+    client = get_chroma_client()
 
     # 4. Supprimer toutes les collections existantes pour ce livre (tous modèles confondus)
     prefix = _normalize_collection_name(f"book_{book.id}_")

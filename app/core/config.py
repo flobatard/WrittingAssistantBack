@@ -1,4 +1,6 @@
 from functools import lru_cache
+
+import chromadb
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -14,10 +16,17 @@ class Settings(BaseSettings):
     # Base de données SQL (PostgreSQL via asyncpg)
     DATABASE_URL: str = "postgresql+asyncpg://writing_user:writing_password@localhost:5430/writing_assistant"
 
-    # ChromaDB
-    CHROMA_PERSIST_DIR: str = "./chroma_data"
+    # ChromaDB HTTP
+    CHROMA_HOST: str = "localhost"
+    CHROMA_PORT: int = 8001
 
 
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
+
+
+@lru_cache
+def get_chroma_client() -> chromadb.HttpClient:
+    s = get_settings()
+    return chromadb.HttpClient(host=s.CHROMA_HOST, port=s.CHROMA_PORT)
