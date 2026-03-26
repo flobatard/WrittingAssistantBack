@@ -32,7 +32,8 @@ async def get_db():
 
 
 async def init_db() -> None:
-    from app.models import book  # noqa: F401 — importe les modèles pour que Base les connaisse
+    from app.models import book  # noqa: F401
+    from app.models import conversation  # noqa: F401
 
     async with engine.begin() as conn:
         print("DB Initiated")
