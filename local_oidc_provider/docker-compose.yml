@@ -1,0 +1,10 @@
+  keycloak:
+    image: quay.io/keycloak/keycloak:latest
+    restart: unless-stopped
+    environment:
+      KC_DB: dev-file # Utilise une DB en fichier local pour le dev (pas besoin de Postgres dédié)
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+    ports:
+      - "8080:8080"
+    command: start-dev # Commande magique pour désactiver le HTTPS obligatoire et optimiser le dev
