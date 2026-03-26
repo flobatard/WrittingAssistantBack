@@ -5,6 +5,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.auth import get_optional_user_sub, resolve_user_id
 from app.core.database import get_db
 from app.models.book import Book
 from app.schemas.book import BookCreate, BookRead, BookUpdate, ChatRequest, ChatResponse
@@ -16,9 +17,20 @@ from app.core.dependancies import get_embedding_config, EmbeddingConfig, get_cha
 router = APIRouter(tags=["books"])
 
 
+def _check_book_access(book: Book, user_id: int | None) -> None:
+    """Lève 403 si l'utilisateur n'a pas accès au livre."""
+    if book.user_id is not None and book.user_id != user_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+
+
 @router.post("/", response_model=BookRead, status_code=status.HTTP_201_CREATED)
-async def create_book(payload: BookCreate, db: AsyncSession = Depends(get_db)):
-    book = Book(**payload.model_dump())
+async def create_book(
+    payload: BookCreate,
+    sub: str | None = Depends(get_optional_user_sub),
+    db: AsyncSession = Depends(get_db),
+):
+    user_id = await resolve_user_id(sub, db)
+    book = Book(**payload.model_dump(), user_id=user_id)
     db.add(book)
     await db.flush()
     await db.refresh(book)
@@ -26,26 +38,50 @@ async def create_book(payload: BookCreate, db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/", response_model=list[BookRead])
-async def list_books(db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Book).order_by(Book.created_at.desc()))
+async def list_books(
+    sub: str | None = Depends(get_optional_user_sub),
+    db: AsyncSession = Depends(get_db),
+):
+    user_id = await resolve_user_id(sub, db)
+    if user_id is not None:
+        result = await db.execute(
+            select(Book)
+            .where((Book.user_id == None) | (Book.user_id == user_id))
+            .order_by(Book.created_at.desc())
+        )
+    else:
+        result = await db.execute(
+            select(Book).where(Book.user_id == None).order_by(Book.created_at.desc())
+        )
     return result.scalars().all()
 
 
 @router.get("/{book_id}", response_model=BookRead)
-async def get_book(book_id: int, db: AsyncSession = Depends(get_db)):
+async def get_book(
+    book_id: int,
+    sub: str | None = Depends(get_optional_user_sub),
+    db: AsyncSession = Depends(get_db),
+):
     book = await db.get(Book, book_id)
     if not book:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found")
+    user_id = await resolve_user_id(sub, db)
+    _check_book_access(book, user_id)
     return book
 
 
 @router.put("/{book_id}", response_model=BookRead)
 async def update_book(
-    book_id: int, payload: BookUpdate, db: AsyncSession = Depends(get_db)
+    book_id: int,
+    payload: BookUpdate,
+    sub: str | None = Depends(get_optional_user_sub),
+    db: AsyncSession = Depends(get_db),
 ):
     book = await db.get(Book, book_id)
     if not book:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found")
+    user_id = await resolve_user_id(sub, db)
+    _check_book_access(book, user_id)
 
     update_data = payload.model_dump(exclude_unset=True)
     for field, value in update_data.items():
@@ -57,21 +93,30 @@ async def update_book(
 
 
 @router.delete("/{book_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_book(book_id: int, db: AsyncSession = Depends(get_db)):
+async def delete_book(
+    book_id: int,
+    sub: str | None = Depends(get_optional_user_sub),
+    db: AsyncSession = Depends(get_db),
+):
     book = await db.get(Book, book_id)
     if not book:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found")
+    user_id = await resolve_user_id(sub, db)
+    _check_book_access(book, user_id)
     await db.delete(book)
 
 
 @router.post("/{book_id}/vectorize")
 async def vectorize(
-        book_id: int, 
+        book_id: int,
+        sub: str | None = Depends(get_optional_user_sub),
         embedding_config: EmbeddingConfig = Depends(get_embedding_config),
         db: AsyncSession = Depends(get_db)):
     book = await db.get(Book, book_id)
     if not book:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found")
+    user_id = await resolve_user_id(sub, db)
+    _check_book_access(book, user_id)
 
     result = vectorize_book(book, embedding_config)
 
@@ -87,10 +132,13 @@ async def query(
         book_id: int,
         q: str,
         k: int = 5,
+        sub: str | None = Depends(get_optional_user_sub),
         embedding_config: EmbeddingConfig = Depends(get_embedding_config),
         db: AsyncSession = Depends(get_db)):
     book = await db.get(Book, book_id)
     if not book:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found")
+    user_id = await resolve_user_id(sub, db)
+    _check_book_access(book, user_id)
 
     return query_book(book, q, embedding_config, k=k)

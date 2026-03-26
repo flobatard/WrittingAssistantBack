@@ -4,6 +4,8 @@ from typing import Any
 import httpx
 from fastapi import Depends, Header, HTTPException
 from jose import JWTError, jwt
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings, get_settings
 
@@ -75,3 +77,41 @@ async def get_current_user_sub(
         raise HTTPException(status_code=401, detail="Claim 'sub' absent du token")
 
     return sub
+
+
+async def get_optional_user_sub(
+    authorization: str | None = Header(default=None),
+    settings: Settings = Depends(get_settings),
+) -> str | None:
+    """Retourne le sub OIDC si un token valide est fourni, sinon None."""
+    if not authorization or not authorization.startswith("Bearer "):
+        return None
+
+    token = authorization.removeprefix("Bearer ")
+
+    try:
+        jwks = await _get_jwks(settings.OIDC_ISSUER_URL)
+        if not _kid_known(token, jwks):
+            jwks = await _get_jwks(settings.OIDC_ISSUER_URL, force_refresh=True)
+        options = {"verify_aud": bool(settings.OIDC_AUDIENCE)}
+        payload = jwt.decode(
+            token,
+            jwks,
+            algorithms=["RS256"],
+            audience=settings.OIDC_AUDIENCE or None,
+            options=options,
+        )
+    except (JWTError, httpx.HTTPError):
+        return None
+
+    return payload.get("sub") or None
+
+
+async def resolve_user_id(sub: str | None, db: AsyncSession) -> int | None:
+    """Résout le sub OIDC en user.id (int) ou None. À appeler depuis les routeurs."""
+    if sub is None:
+        return None
+    from app.models.user import User
+    result = await db.execute(select(User).where(User.oidc_sub == sub))
+    user = result.scalar_one_or_none()
+    return user.id if user else None

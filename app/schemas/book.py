@@ -20,6 +20,7 @@ class BookRead(BaseModel):
     model_config = {"from_attributes": True}
 
     id: int
+    user_id: Optional[int]
     title: str
     content: str
     genre: Optional[str]

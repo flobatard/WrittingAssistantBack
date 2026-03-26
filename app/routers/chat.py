@@ -5,6 +5,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.auth import get_optional_user_sub, resolve_user_id
 from app.core.database import get_db
 from app.core.dependancies import ChatConfig, EmbeddingConfig, get_chat_config, get_embedding_config
 from app.models.book import Book
@@ -25,10 +26,12 @@ from app.services.chat import (
 router = APIRouter(tags=["conversations"])
 
 
-async def _get_book_or_404(book_id: int, db: AsyncSession) -> Book:
+async def _get_book_or_404(book_id: int, db: AsyncSession, user_id: int | None = None) -> Book:
     book = await db.get(Book, book_id)
     if not book:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found")
+    if book.user_id is not None and book.user_id != user_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
     return book
 
 
@@ -40,8 +43,13 @@ async def _get_conversation_or_404(conversation_id: int, book_id: int, db: Async
 
 
 @router.get("/{book_id}/conversations", response_model=list[ConversationRead])
-async def list_conversations(book_id: int, db: AsyncSession = Depends(get_db)):
-    await _get_book_or_404(book_id, db)
+async def list_conversations(
+    book_id: int,
+    sub: str | None = Depends(get_optional_user_sub),
+    db: AsyncSession = Depends(get_db),
+):
+    user_id = await resolve_user_id(sub, db)
+    await _get_book_or_404(book_id, db, user_id)
     result = await db.execute(
         select(Conversation)
         .where(Conversation.book_id == book_id)
@@ -51,8 +59,14 @@ async def list_conversations(book_id: int, db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/{book_id}/conversations/{conversation_id}/messages", response_model=list[ChatMessageRead])
-async def list_messages(book_id: int, conversation_id: int, db: AsyncSession = Depends(get_db)):
-    await _get_book_or_404(book_id, db)
+async def list_messages(
+    book_id: int,
+    conversation_id: int,
+    sub: str | None = Depends(get_optional_user_sub),
+    db: AsyncSession = Depends(get_db),
+):
+    user_id = await resolve_user_id(sub, db)
+    await _get_book_or_404(book_id, db, user_id)
     await _get_conversation_or_404(conversation_id, book_id, db)
     result = await db.execute(
         select(ChatMessage)
@@ -66,11 +80,13 @@ async def list_messages(book_id: int, conversation_id: int, db: AsyncSession = D
 async def create_conversation(
     book_id: int,
     payload: ConversationChatRequest,
+    sub: str | None = Depends(get_optional_user_sub),
     chat_config: ChatConfig = Depends(get_chat_config),
     embedding_config: EmbeddingConfig = Depends(get_embedding_config),
     db: AsyncSession = Depends(get_db),
 ):
-    book = await _get_book_or_404(book_id, db)
+    user_id = await resolve_user_id(sub, db)
+    book = await _get_book_or_404(book_id, db, user_id)
     if not book.embedding_model_used:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -135,11 +151,13 @@ async def send_message(
     book_id: int,
     conversation_id: int,
     payload: ConversationChatRequest,
+    sub: str | None = Depends(get_optional_user_sub),
     chat_config: ChatConfig = Depends(get_chat_config),
     embedding_config: EmbeddingConfig = Depends(get_embedding_config),
     db: AsyncSession = Depends(get_db),
 ):
-    book = await _get_book_or_404(book_id, db)
+    user_id = await resolve_user_id(sub, db)
+    book = await _get_book_or_404(book_id, db, user_id)
     if not book.embedding_model_used:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
