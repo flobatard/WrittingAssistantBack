@@ -1,3 +1,4 @@
+import time
 from typing import Any
 
 import httpx
@@ -6,13 +7,13 @@ from jose import JWTError, jwt
 
 from app.core.config import Settings, get_settings
 
+_JWKS_TTL = 3600  # secondes
+
 _jwks_cache: dict[str, Any] | None = None
+_jwks_fetched_at: float = 0.0
 
 
-async def _get_jwks(issuer_url: str) -> dict[str, Any]:
-    global _jwks_cache
-    if _jwks_cache is not None:
-        return _jwks_cache
+async def _fetch_jwks(issuer_url: str) -> dict[str, Any]:
     discovery_url = issuer_url.rstrip("/") + "/.well-known/openid-configuration"
     async with httpx.AsyncClient() as client:
         discovery = await client.get(discovery_url)
@@ -20,8 +21,27 @@ async def _get_jwks(issuer_url: str) -> dict[str, Any]:
         jwks_url = discovery.json()["jwks_uri"]
         response = await client.get(jwks_url)
         response.raise_for_status()
-        _jwks_cache = response.json()
+        return response.json()
+
+
+async def _get_jwks(issuer_url: str, force_refresh: bool = False) -> dict[str, Any]:
+    global _jwks_cache, _jwks_fetched_at
+    cache_expired = (time.monotonic() - _jwks_fetched_at) >= _JWKS_TTL
+    if force_refresh or _jwks_cache is None or cache_expired:
+        _jwks_cache = await _fetch_jwks(issuer_url)
+        _jwks_fetched_at = time.monotonic()
     return _jwks_cache
+
+
+def _kid_known(token: str, jwks: dict[str, Any]) -> bool:
+    """Vérifie que le kid du JWT est présent dans les JWKS. Si absent du header, on laisse passer."""
+    try:
+        kid = jwt.get_unverified_header(token).get("kid")
+    except JWTError:
+        return True  # header illisible → on laisse jwt.decode gérer l'erreur
+    if kid is None:
+        return True  # pas de kid → pas de rotation à gérer
+    return any(key.get("kid") == kid for key in jwks.get("keys", []))
 
 
 async def get_current_user_sub(
@@ -35,6 +55,8 @@ async def get_current_user_sub(
 
     try:
         jwks = await _get_jwks(settings.OIDC_ISSUER_URL)
+        if not _kid_known(token, jwks):
+            jwks = await _get_jwks(settings.OIDC_ISSUER_URL, force_refresh=True)
         options = {"verify_aud": bool(settings.OIDC_AUDIENCE)}
         payload = jwt.decode(
             token,
@@ -46,7 +68,6 @@ async def get_current_user_sub(
     except JWTError as e:
         raise HTTPException(status_code=401, detail=f"Token invalide : {e}")
     except httpx.HTTPError as e:
-        print("ER")
         raise HTTPException(status_code=503, detail=f"Impossible de joindre l'OIDC provider : {e}")
 
     sub: str | None = payload.get("sub")
