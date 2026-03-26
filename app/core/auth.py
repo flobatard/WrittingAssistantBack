@@ -13,8 +13,11 @@ async def _get_jwks(issuer_url: str) -> dict[str, Any]:
     global _jwks_cache
     if _jwks_cache is not None:
         return _jwks_cache
-    jwks_url = issuer_url.rstrip("/") + "/.well-known/jwks.json"
+    discovery_url = issuer_url.rstrip("/") + "/.well-known/openid-configuration"
     async with httpx.AsyncClient() as client:
+        discovery = await client.get(discovery_url)
+        discovery.raise_for_status()
+        jwks_url = discovery.json()["jwks_uri"]
         response = await client.get(jwks_url)
         response.raise_for_status()
         _jwks_cache = response.json()
@@ -43,6 +46,7 @@ async def get_current_user_sub(
     except JWTError as e:
         raise HTTPException(status_code=401, detail=f"Token invalide : {e}")
     except httpx.HTTPError as e:
+        print("ER")
         raise HTTPException(status_code=503, detail=f"Impossible de joindre l'OIDC provider : {e}")
 
     sub: str | None = payload.get("sub")
