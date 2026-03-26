@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import get_settings
 from app.core.database import init_db
-from app.routers import books, chat
+from app.routers import auth, books, chat
 
 
 @asynccontextmanager
@@ -29,5 +29,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(auth.router, prefix="/auth")
 app.include_router(books.router, prefix="/books")
 app.include_router(chat.router, prefix="/books/chat")
