@@ -121,11 +121,13 @@ series          ← saga regroupant plusieurs livres
 ### `manuscript_nodes`
 | Champ | Type | Description |
 |---|---|---|
-| `parent_id` | FK nullable (self) | Nœud parent — permet l'imbrication |
+| `front_id` | UUID non-nullable, unique | Identifiant stable côté client. Généré automatiquement par la DB (`gen_random_uuid()`) si absent à la création. Sert de cible FK pour `parent_front_id`. |
+| `parent_front_id` | FK UUID nullable (self → `front_id`) | Nœud parent — permet l'imbrication. Mis à `NULL` si le parent est supprimé (`SET NULL`). |
 | `node_type` | string | `'part'`, `'chapter'`, `'scene'`, `'interlude'`… |
 | `content` | TEXT nullable | Markdown du nœud (`null` pour les nœuds conteneurs comme `'part'`) |
 | `position` | float | Fractional indexing parmi les frères/sœurs |
 | `is_numbered` | bool | Numérotation affichée |
+| `depth_level` | int (défaut 2) | Niveau d'imbrication visuel/logique, maintenu par le client |
 
 ## Endpoints
 
@@ -155,11 +157,15 @@ series          ← saga regroupant plusieurs livres
 |---|---|---|
 | `POST` | `/books/{book_id}/manuscript-nodes/` | Créer un nœud |
 | `GET` | `/books/{book_id}/manuscript-nodes/` | Lister tous les nœuds (flat, triés par `position`) |
-| `GET` | `/books/{book_id}/manuscript-nodes/{node_id}` | Détail d'un nœud |
-| `PUT` | `/books/{book_id}/manuscript-nodes/{node_id}` | Modifier (contenu, position, parent…) |
-| `DELETE` | `/books/{book_id}/manuscript-nodes/{node_id}` | Supprimer |
+| `GET` | `/books/{book_id}/manuscript-nodes/{node_id}` | Détail d'un nœud (par `id` entier) |
+| `PUT` | `/books/{book_id}/manuscript-nodes/{node_id}` | Modifier (par `id` entier) |
+| `DELETE` | `/books/{book_id}/manuscript-nodes/{node_id}` | Supprimer (par `id` entier) |
+| `GET` | `/books/{book_id}/manuscript-nodes/by-front-id/{front_id}` | Détail d'un nœud (par `front_id` UUID) |
+| `PUT` | `/books/{book_id}/manuscript-nodes/by-front-id/{front_id}` | Modifier (par `front_id` UUID) |
+| `DELETE` | `/books/{book_id}/manuscript-nodes/by-front-id/{front_id}` | Supprimer (par `front_id` UUID) |
+| `PATCH` | `/books/{book_id}/multiple-manuscript-nodes-update` | Créer / modifier / supprimer en batch (updates et deletes identifiés par `front_id`) |
 
-Le front reconstruit l'arbre à partir des champs `parent_id` renvoyés. Un `node_id` appartenant à un autre livre retourne `404`.
+Le front reconstruit l'arbre à partir du champ `parent_front_id` renvoyé. Un nœud appartenant à un autre livre retourne `404`.
 
 ### RAG
 
