@@ -34,3 +34,7 @@ app.include_router(series.router, prefix="/series")
 app.include_router(books.router, prefix="/books")
 app.include_router(manuscript_nodes.router, prefix="/books")
 app.include_router(chat.router, prefix="/books/chat")
+
+if get_settings().APP_ENV == "development":
+    from app.routers import dev
+    app.include_router(dev.router, prefix="/dev")

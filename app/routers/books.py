@@ -95,7 +95,7 @@ async def vectorize(
 
     result = vectorize_book(book, embedding_config, chapters)
 
-    book.embedding_model_used = result["collection_name"].split("_", 2)[-1] if "_" in result["collection_name"] else None
+    book.embedding_model_used = embedding_config.model
     await db.flush()
 
     return result
