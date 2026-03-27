@@ -1,10 +1,12 @@
 from datetime import datetime
 from typing import Optional
+from uuid import UUID
 
 from pydantic import BaseModel
 
 
 class ManuscriptNodeCreate(BaseModel):
+    front_id: Optional[UUID] = None
     parent_id: Optional[int] = None
     node_type: str = "chapter"
     title: str
@@ -15,6 +17,7 @@ class ManuscriptNodeCreate(BaseModel):
 
 
 class ManuscriptNodeUpdate(BaseModel):
+    front_id: Optional[UUID] = None
     parent_id: Optional[int] = None
     node_type: Optional[str] = None
     title: Optional[str] = None
@@ -28,6 +31,7 @@ class ManuscriptNodeRead(BaseModel):
     model_config = {"from_attributes": True}
 
     id: int
+    front_id: Optional[UUID]
     book_id: int
     parent_id: Optional[int]
     node_type: str

@@ -142,6 +142,8 @@ alembic upgrade head
 alembic revision --autogenerate -m "description"
 ```
 
+L'utilisateur s'occupera toujours de créer les nouvelles migrations manuellement.
+
 PostgreSQL connection (default): `postgresql+asyncpg://writing_user:writing_password@localhost:5430/writing_assistant`
 
 ### Scripts

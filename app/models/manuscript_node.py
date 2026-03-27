@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING, Optional
 
 from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text, func
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -21,6 +23,9 @@ class ManuscriptNode(Base):
     )
     parent_id: Mapped[Optional[int]] = mapped_column(
         ForeignKey("manuscript_nodes.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    front_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True), nullable=True, unique=True, index=True
     )
     node_type: Mapped[str] = mapped_column(String(50), nullable=False, default="chapter")
     title: Mapped[str] = mapped_column(String(255), nullable=False)
