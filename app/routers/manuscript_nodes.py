@@ -1,3 +1,5 @@
+from uuid import UUID
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,6 +20,19 @@ async def _get_node_for_book(book_id: int, node_id: int, db: AsyncSession) -> Ma
     return node
 
 
+async def _get_node_by_front_id(book_id: int, front_id: UUID, db: AsyncSession) -> ManuscriptNode:
+    result = await db.execute(
+        select(ManuscriptNode).where(
+            ManuscriptNode.front_id == front_id,
+            ManuscriptNode.book_id == book_id,
+        )
+    )
+    node = result.scalar_one_or_none()
+    if node is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Node not found")
+    return node
+
+
 @router.post(
     "/{book_id}/manuscript-nodes/",
     response_model=ManuscriptNodeRead,
@@ -28,9 +43,14 @@ async def create_node(
     book: Book = Depends(get_book_for_user),
     db: AsyncSession = Depends(get_db),
 ):
-    if payload.parent_id is not None:
-        parent = await db.get(ManuscriptNode, payload.parent_id)
-        if not parent or parent.book_id != book.id:
+    if payload.parent_front_id is not None:
+        result = await db.execute(
+            select(ManuscriptNode).where(
+                ManuscriptNode.front_id == payload.parent_front_id,
+                ManuscriptNode.book_id == book.id,
+            )
+        )
+        if result.scalar_one_or_none() is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Parent node not found")
 
     node = ManuscriptNode(**payload.model_dump(), book_id=book.id)
@@ -71,9 +91,14 @@ async def update_node(
 ):
     node = await _get_node_for_book(book.id, node_id, db)
 
-    if payload.parent_id is not None:
-        parent = await db.get(ManuscriptNode, payload.parent_id)
-        if not parent or parent.book_id != book.id:
+    if payload.parent_front_id is not None:
+        result = await db.execute(
+            select(ManuscriptNode).where(
+                ManuscriptNode.front_id == payload.parent_front_id,
+                ManuscriptNode.book_id == book.id,
+            )
+        )
+        if result.scalar_one_or_none() is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Parent node not found")
 
     for field, value in payload.model_dump(exclude_unset=True).items():
@@ -94,50 +119,112 @@ async def delete_node(
     await db.delete(node)
 
 
+@router.get("/{book_id}/manuscript-nodes/by-front-id/{front_id}", response_model=ManuscriptNodeRead)
+async def get_node_by_front_id(
+    front_id: UUID,
+    book: Book = Depends(get_book_for_user),
+    db: AsyncSession = Depends(get_db),
+):
+    return await _get_node_by_front_id(book.id, front_id, db)
+
+
+@router.put("/{book_id}/manuscript-nodes/by-front-id/{front_id}", response_model=ManuscriptNodeRead)
+async def update_node_by_front_id(
+    front_id: UUID,
+    payload: ManuscriptNodeUpdate,
+    book: Book = Depends(get_book_for_user),
+    db: AsyncSession = Depends(get_db),
+):
+    node = await _get_node_by_front_id(book.id, front_id, db)
+
+    if payload.parent_front_id is not None:
+        result = await db.execute(
+            select(ManuscriptNode).where(
+                ManuscriptNode.front_id == payload.parent_front_id,
+                ManuscriptNode.book_id == book.id,
+            )
+        )
+        if result.scalar_one_or_none() is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Parent node not found")
+
+    for field, value in payload.model_dump(exclude_unset=True).items():
+        setattr(node, field, value)
+
+    await db.flush()
+    await db.refresh(node)
+    return node
+
+
+@router.delete(
+    "/{book_id}/manuscript-nodes/by-front-id/{front_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def delete_node_by_front_id(
+    front_id: UUID,
+    book: Book = Depends(get_book_for_user),
+    db: AsyncSession = Depends(get_db),
+):
+    node = await _get_node_by_front_id(book.id, front_id, db)
+    await db.delete(node)
+
+
 @router.patch("/{book_id}/multiple-manuscript-nodes-update", response_model=list[ManuscriptNodeRead])
 async def bulk_update_nodes(
     payload: NodeDiff,
     book: Book = Depends(get_book_for_user),
     db: AsyncSession = Depends(get_db),
 ):
-    update_ids = [item.id for item in payload.to_update]
-    all_referenced_ids = set(update_ids) | set(payload.to_delete)
+    all_front_ids = {item.front_id for item in payload.to_update} | set(payload.to_delete)
 
-    for item in payload.to_create:
-        if item.payload.parent_id is not None:
-            all_referenced_ids.add(item.payload.parent_id)
-    for item in payload.to_update:
-        if item.payload.parent_id is not None:
-            all_referenced_ids.add(item.payload.parent_id)
-
-    if all_referenced_ids:
+    if all_front_ids:
         result = await db.execute(
-            select(ManuscriptNode.id).where(
-                ManuscriptNode.id.in_(all_referenced_ids),
+            select(ManuscriptNode.front_id).where(
+                ManuscriptNode.front_id.in_(all_front_ids),
                 ManuscriptNode.book_id == book.id,
             )
         )
-        found_ids = set(result.scalars().all())
-        missing = all_referenced_ids - found_ids
+        found_front_ids = set(result.scalars().all())
+        missing = all_front_ids - found_front_ids
         if missing:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Nodes not found: {missing}")
 
-    # Updates must run before deletes: parent_id CASCADE would wipe children
-    # that are being re-parented in the same batch.
-    if payload.to_update:
+    parent_front_ids = {
+        item.payload.parent_front_id
+        for item in (*payload.to_create, *payload.to_update)
+        if item.payload.parent_front_id is not None
+    }
+    if parent_front_ids:
         result = await db.execute(
-            select(ManuscriptNode).where(ManuscriptNode.id.in_(update_ids))
+            select(ManuscriptNode.front_id).where(
+                ManuscriptNode.front_id.in_(parent_front_ids),
+                ManuscriptNode.book_id == book.id,
+            )
         )
-        nodes_by_id = {n.id: n for n in result.scalars().all()}
+        found_parent_ids = set(result.scalars().all())
+        missing_parents = parent_front_ids - found_parent_ids
+        if missing_parents:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Parent nodes not found: {missing_parents}",
+            )
+
+    # Updates must run before deletes: deleting a parent sets parent_front_id to NULL
+    # on children; run updates first so re-parented nodes keep their new parent.
+    if payload.to_update:
+        update_front_ids = [item.front_id for item in payload.to_update]
+        result = await db.execute(
+            select(ManuscriptNode).where(ManuscriptNode.front_id.in_(update_front_ids))
+        )
+        nodes_by_front_id = {n.front_id: n for n in result.scalars().all()}
         for item in payload.to_update:
-            node = nodes_by_id[item.id]
+            node = nodes_by_front_id[item.front_id]
             for field, value in item.payload.model_dump(exclude_unset=True).items():
                 setattr(node, field, value)
         await db.flush()
 
     if payload.to_delete:
         await db.execute(
-            delete(ManuscriptNode).where(ManuscriptNode.id.in_(payload.to_delete))
+            delete(ManuscriptNode).where(ManuscriptNode.front_id.in_(payload.to_delete))
         )
 
     new_nodes: list[ManuscriptNode] = []

@@ -21,11 +21,14 @@ class ManuscriptNode(Base):
     book_id: Mapped[int] = mapped_column(
         ForeignKey("books.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    parent_id: Mapped[Optional[int]] = mapped_column(
-        ForeignKey("manuscript_nodes.id", ondelete="CASCADE"), nullable=True, index=True
-    )
     front_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         UUID(as_uuid=True), nullable=True, unique=True, index=True
+    )
+    parent_front_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("manuscript_nodes.front_id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
     )
     node_type: Mapped[str] = mapped_column(String(50), nullable=False, default="chapter")
     title: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -42,8 +45,12 @@ class ManuscriptNode(Base):
     children: Mapped[list[ManuscriptNode]] = relationship(
         "ManuscriptNode",
         back_populates="parent",
+        foreign_keys="[ManuscriptNode.parent_front_id]",
         order_by="ManuscriptNode.position",
     )
     parent: Mapped[Optional[ManuscriptNode]] = relationship(
-        "ManuscriptNode", back_populates="children", remote_side="ManuscriptNode.id"
+        "ManuscriptNode",
+        back_populates="children",
+        foreign_keys="[ManuscriptNode.parent_front_id]",
+        remote_side="[ManuscriptNode.front_id]",
     )

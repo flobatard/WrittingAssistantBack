@@ -7,7 +7,7 @@ from pydantic import BaseModel
 
 class ManuscriptNodeCreate(BaseModel):
     front_id: Optional[UUID] = None
-    parent_id: Optional[int] = None
+    parent_front_id: Optional[UUID] = None
     node_type: str = "chapter"
     title: str
     content: Optional[str] = None
@@ -18,7 +18,7 @@ class ManuscriptNodeCreate(BaseModel):
 
 class ManuscriptNodeUpdate(BaseModel):
     front_id: Optional[UUID] = None
-    parent_id: Optional[int] = None
+    parent_front_id: Optional[UUID] = None
     node_type: Optional[str] = None
     title: Optional[str] = None
     content: Optional[str] = None
@@ -33,7 +33,7 @@ class ManuscriptNodeRead(BaseModel):
     id: int
     front_id: Optional[UUID]
     book_id: int
-    parent_id: Optional[int]
+    parent_front_id: Optional[UUID]
     node_type: str
     title: str
     content: Optional[str]
@@ -50,11 +50,11 @@ class NodeCreateItem(BaseModel):
 
 
 class NodeUpdateItem(BaseModel):
-    id: int
+    front_id: UUID
     payload: ManuscriptNodeUpdate
 
 
 class NodeDiff(BaseModel):
     to_create: list[NodeCreateItem] = []
     to_update: list[NodeUpdateItem] = []
-    to_delete: list[int] = []
+    to_delete: list[UUID] = []
