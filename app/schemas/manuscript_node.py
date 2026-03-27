@@ -11,6 +11,7 @@ class ManuscriptNodeCreate(BaseModel):
     content: Optional[str] = None
     position: float
     is_numbered: bool = True
+    depth_level: int = 0
 
 
 class ManuscriptNodeUpdate(BaseModel):
@@ -20,6 +21,7 @@ class ManuscriptNodeUpdate(BaseModel):
     content: Optional[str] = None
     position: Optional[float] = None
     is_numbered: Optional[bool] = None
+    depth_level: Optional[int] = None
 
 
 class ManuscriptNodeRead(BaseModel):
@@ -33,5 +35,6 @@ class ManuscriptNodeRead(BaseModel):
     content: Optional[str]
     position: float
     is_numbered: bool
+    depth_level: int
     created_at: datetime
     updated_at: datetime
