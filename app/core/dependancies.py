@@ -1,5 +1,13 @@
 from dataclasses import dataclass
-from fastapi import Header, HTTPException
+
+from fastapi import Depends, Header, HTTPException, status
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.auth import get_optional_user_sub, resolve_user_id
+from app.core.database import get_db
+    
+from app.models.book import Book
+
 
 @dataclass
 class ChatConfig:
@@ -33,6 +41,20 @@ async def get_chat_config(
         url=x_chat_api_url,
         model=x_chat_model,
     )
+
+async def get_book_for_user(
+    book_id: int,
+    sub: str | None = Depends(get_optional_user_sub),
+    db: AsyncSession = Depends(get_db),
+):
+    book = await db.get(Book, book_id)
+    if not book:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found")
+    user_id = await resolve_user_id(sub, db)
+    if book.user_id is not None and book.user_id != user_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+    return book
+
 
 async def get_embedding_config(
     x_embedding_provider: str | None = Header(default=None),

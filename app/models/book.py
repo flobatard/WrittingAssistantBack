@@ -1,22 +1,40 @@
-from datetime import datetime
-from typing import Optional
+from __future__ import annotations
 
-from sqlalchemy import DateTime, ForeignKey, String, Text, func
-from sqlalchemy.orm import Mapped, mapped_column
+from datetime import datetime
+from typing import TYPE_CHECKING, Optional
+
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, String, func
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
+
+if TYPE_CHECKING:
+    from app.models.manuscript_node import ManuscriptNode
 
 
 class Book(Base):
     __tablename__ = "books"
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
-    user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True)
+    user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    series_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("series.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    parent_book_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("books.id", ondelete="SET NULL"), nullable=True
+    )
+    position_in_series: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    is_spinoff: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     title: Mapped[str] = mapped_column(String(255), nullable=False)
-    genre: Mapped[str] = mapped_column(String(255))
-    content: Mapped[str] = mapped_column(Text, nullable=False)
+    genre: Mapped[str] = mapped_column(String(255), nullable=True)
     embedding_model_used: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now(), onupdate=func.now()
+    )
+
+    manuscript_nodes: Mapped[list["ManuscriptNode"]] = relationship(  # noqa: F821
+        "ManuscriptNode", back_populates="book", order_by="ManuscriptNode.position", lazy="selectin"
     )
