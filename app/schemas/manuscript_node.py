@@ -38,3 +38,19 @@ class ManuscriptNodeRead(BaseModel):
     depth_level: int
     created_at: datetime
     updated_at: datetime
+
+
+class NodeCreateItem(BaseModel):
+    line_number: int
+    payload: ManuscriptNodeCreate
+
+
+class NodeUpdateItem(BaseModel):
+    id: int
+    payload: ManuscriptNodeUpdate
+
+
+class NodeDiff(BaseModel):
+    to_create: list[NodeCreateItem] = []
+    to_update: list[NodeUpdateItem] = []
+    to_delete: list[int] = []

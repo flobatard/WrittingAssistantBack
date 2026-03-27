@@ -1,12 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.dependancies import get_book_for_user
 from app.models.book import Book
 from app.models.manuscript_node import ManuscriptNode
-from app.schemas.manuscript_node import ManuscriptNodeCreate, ManuscriptNodeRead, ManuscriptNodeUpdate
+from app.schemas.manuscript_node import ManuscriptNodeCreate, ManuscriptNodeRead, ManuscriptNodeUpdate, NodeDiff
 
 router = APIRouter(tags=["manuscript_nodes"])
 
@@ -92,3 +92,61 @@ async def delete_node(
 ):
     node = await _get_node_for_book(book.id, node_id, db)
     await db.delete(node)
+
+
+@router.patch("/{book_id}/multiple-manuscript-nodes-update", response_model=list[ManuscriptNodeRead])
+async def bulk_update_nodes(
+    payload: NodeDiff,
+    book: Book = Depends(get_book_for_user),
+    db: AsyncSession = Depends(get_db),
+):
+    update_ids = [item.id for item in payload.to_update]
+    all_referenced_ids = set(update_ids) | set(payload.to_delete)
+
+    for item in payload.to_create:
+        if item.payload.parent_id is not None:
+            all_referenced_ids.add(item.payload.parent_id)
+    for item in payload.to_update:
+        if item.payload.parent_id is not None:
+            all_referenced_ids.add(item.payload.parent_id)
+
+    if all_referenced_ids:
+        result = await db.execute(
+            select(ManuscriptNode.id).where(
+                ManuscriptNode.id.in_(all_referenced_ids),
+                ManuscriptNode.book_id == book.id,
+            )
+        )
+        found_ids = set(result.scalars().all())
+        missing = all_referenced_ids - found_ids
+        if missing:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Nodes not found: {missing}")
+
+    if payload.to_delete:
+        await db.execute(
+            delete(ManuscriptNode).where(ManuscriptNode.id.in_(payload.to_delete))
+        )
+
+    if payload.to_update:
+        result = await db.execute(
+            select(ManuscriptNode).where(ManuscriptNode.id.in_(update_ids))
+        )
+        nodes_by_id = {n.id: n for n in result.scalars().all()}
+        for item in payload.to_update:
+            node = nodes_by_id[item.id]
+            for field, value in item.payload.model_dump(exclude_unset=True).items():
+                setattr(node, field, value)
+        await db.flush()
+
+    new_nodes: list[ManuscriptNode] = []
+    if payload.to_create:
+        new_nodes = [
+            ManuscriptNode(**item.payload.model_dump(), book_id=book.id)
+            for item in payload.to_create
+        ]
+        db.add_all(new_nodes)
+        await db.flush()
+        for n in new_nodes:
+            await db.refresh(n)
+
+    return new_nodes
