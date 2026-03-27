@@ -187,6 +187,19 @@ async def bulk_update_nodes(
         missing = all_front_ids - found_front_ids
         if missing:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Nodes not found: {missing}")
+        
+    ## We create nodes first cause we will check if parents exists afterwards (if we create multiple with parents it will not work)
+    new_nodes: list[ManuscriptNode] = []
+    if payload.to_create:
+        new_nodes = [
+            ManuscriptNode(**item.payload.model_dump(), book_id=book.id)
+            for item in payload.to_create
+        ]
+        db.add_all(new_nodes)
+        await db.flush()
+        for n in new_nodes:
+            await db.refresh(n)
+
 
     parent_front_ids = {
         item.payload.parent_front_id
@@ -226,16 +239,4 @@ async def bulk_update_nodes(
         await db.execute(
             delete(ManuscriptNode).where(ManuscriptNode.front_id.in_(payload.to_delete))
         )
-
-    new_nodes: list[ManuscriptNode] = []
-    if payload.to_create:
-        new_nodes = [
-            ManuscriptNode(**item.payload.model_dump(), book_id=book.id)
-            for item in payload.to_create
-        ]
-        db.add_all(new_nodes)
-        await db.flush()
-        for n in new_nodes:
-            await db.refresh(n)
-
     return new_nodes

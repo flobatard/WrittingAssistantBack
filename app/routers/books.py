@@ -28,12 +28,6 @@ async def create_book(
     db.add(book)
     await db.flush()
 
-    first_chapter = ManuscriptNode(
-        book_id=book.id, title="First Chapter", node_type="chapter", content="", position=1000.0
-    )
-    db.add(first_chapter)
-    await db.flush()
-
     await db.refresh(book)
     return book
 
