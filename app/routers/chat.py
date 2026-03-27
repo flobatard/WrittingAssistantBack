@@ -18,9 +18,9 @@ from app.schemas.conversation import (
     MessageChatResponse,
 )
 from app.services.chat import (
-    chat_with_book_history,
+    chat_with_book_history_agentic,
     generate_conversation_title,
-    stream_chat_with_book_history,
+    stream_chat_with_book_history_agentic,
 )
 
 router = APIRouter(tags=["conversations"])
@@ -106,7 +106,7 @@ async def create_conversation(
     if payload.stream:
         async def streamer():
             full_response = ""
-            async for event in stream_chat_with_book_history(book, payload.question, [], payload.k, chat_config, embedding_config):
+            async for event in stream_chat_with_book_history_agentic(book, payload.question, [], chat_config, embedding_config, db):
                 yield event
                 if '"full_response"' in event:
                     import json as _json
@@ -124,8 +124,8 @@ async def create_conversation(
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
 
-    result = await asyncio.to_thread(
-        chat_with_book_history, book, payload.question, [], payload.k, chat_config, embedding_config
+    result = await chat_with_book_history_agentic(
+        book, payload.question, [], chat_config, embedding_config, db
     )
 
     assistant_msg = ChatMessage(conversation_id=conversation.id, author="assistant", content=result["answer"])
@@ -179,7 +179,7 @@ async def send_message(
     if payload.stream:
         async def streamer():
             full_response = ""
-            async for event in stream_chat_with_book_history(book, payload.question, history, payload.k, chat_config, embedding_config):
+            async for event in stream_chat_with_book_history_agentic(book, payload.question, history, chat_config, embedding_config, db):
                 yield event
                 if '"full_response"' in event:
                     import json as _json
@@ -195,8 +195,8 @@ async def send_message(
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
 
-    result = await asyncio.to_thread(
-        chat_with_book_history, book, payload.question, history, payload.k, chat_config, embedding_config
+    result = await chat_with_book_history_agentic(
+        book, payload.question, history, chat_config, embedding_config, db
     )
 
     assistant_msg = ChatMessage(conversation_id=conversation.id, author="assistant", content=result["answer"])
