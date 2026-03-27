@@ -122,11 +122,8 @@ async def bulk_update_nodes(
         if missing:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Nodes not found: {missing}")
 
-    if payload.to_delete:
-        await db.execute(
-            delete(ManuscriptNode).where(ManuscriptNode.id.in_(payload.to_delete))
-        )
-
+    # Updates must run before deletes: parent_id CASCADE would wipe children
+    # that are being re-parented in the same batch.
     if payload.to_update:
         result = await db.execute(
             select(ManuscriptNode).where(ManuscriptNode.id.in_(update_ids))
@@ -137,6 +134,11 @@ async def bulk_update_nodes(
             for field, value in item.payload.model_dump(exclude_unset=True).items():
                 setattr(node, field, value)
         await db.flush()
+
+    if payload.to_delete:
+        await db.execute(
+            delete(ManuscriptNode).where(ManuscriptNode.id.in_(payload.to_delete))
+        )
 
     new_nodes: list[ManuscriptNode] = []
     if payload.to_create:
