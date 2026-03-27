@@ -31,7 +31,7 @@ class ManuscriptNodeRead(BaseModel):
     model_config = {"from_attributes": True}
 
     id: int
-    front_id: Optional[UUID]
+    front_id: UUID
     book_id: int
     parent_front_id: Optional[UUID]
     node_type: str
