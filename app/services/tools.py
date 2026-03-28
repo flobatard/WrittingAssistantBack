@@ -17,9 +17,9 @@ def make_book_tools(book: Book, db: AsyncSession, embedding_config: EmbeddingCon
 
     @tool
     def search_book(query: str) -> str:
-        """Search the book content semantically. Use this to find relevant passages
-        about a topic, character, event, or theme. Returns ranked excerpts with
-        their chapter titles."""
+        """Search the book content semantically. Use this to find specific mentions of a topic, character, or event.
+        IMPORTANT: The results are short excerpts. If you find a relevant excerpt and need to understand the whole scene, 
+        note the 'node_title' or 'id' from these results, and then use the `read_chapter` tool to read the full text."""
         results = query_book(book, query, embedding_config, k=7)
         parts = []
         for r in results["results"]:
@@ -28,9 +28,10 @@ def make_book_tools(book: Book, db: AsyncSession, embedding_config: EmbeddingCon
 
     @tool
     async def read_chapter(identifier: str) -> str:
-        """Read the full content of a chapter, scene, or part, including all its children.
-        Pass a front_id (UUID) or a title (partial match accepted).
-        Use list_chapters first if unsure of the exact name."""
+        """Read the full, detailed text of a specific chapter or scene.
+        Pass the exact ID (UUID) or the title of the chapter.
+        If you don't know the exact ID or title, you MUST use the `list_chapters` tool first to find it.
+        After reading, you can answer the user or use `search_book` if you need to cross-reference something else."""
         node = None
         # Try UUID first
         try:
@@ -91,9 +92,8 @@ def make_book_tools(book: Book, db: AsyncSession, embedding_config: EmbeddingCon
 
     @tool
     async def list_chapters() -> str:
-        """List all chapters, scenes, and parts of the book with their titles,
-        front_ids, and node types. Use this to discover the book structure before
-        reading specific chapters."""
+        """Returns the complete table of contents of the manuscript (chapters, scenes, parts) with their precise IDs.
+        ALWAYS use this tool first if you need to understand the chronology of the book or if you need to find a specific chapter ID to pass to the `read_chapter` tool."""
         result = await db.execute(
             select(ManuscriptNode)
             .where(ManuscriptNode.book_id == book.id)
