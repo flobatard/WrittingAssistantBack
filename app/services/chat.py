@@ -24,7 +24,9 @@ _AGENTIC_SYSTEM = (
     "CRITICAL RULES:\n"
     "- NEVER guess, hallucinate, or invent story details. If the tools don't provide the answer, say you don't know.\n"
     "- Do not answer immediately if you only have partial information. Take another turn to use another tool.\n"
-    "- Always cite the chapter titles or IDs when providing facts from the manuscript."
+    "- Always cite the chapter titles or IDs when providing facts from the manuscript.\n"
+
+    "IMPORTANT: Use the standard tool-calling format. Do not use XML tags like <tool_call> or </tool_call>. Generate your tool calls purely through the provided API structure."
 )
 
 
