@@ -1,7 +1,9 @@
 import uuid as _uuid
+from collections import defaultdict
 
 from langchain_core.tools import tool
 from sqlalchemy import select
+from sqlalchemy.orm import defer
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.dependancies import EmbeddingConfig
@@ -66,18 +68,33 @@ def make_book_tools(book: Book, db: AsyncSession, embedding_config: EmbeddingCon
         result = await db.execute(
             select(ManuscriptNode)
             .where(ManuscriptNode.book_id == book.id)
+            .options(defer(ManuscriptNode.content))
             .order_by(ManuscriptNode.position)
         )
         nodes = result.scalars().all()
         if not nodes:
             return "No chapters found."
-        lines = []
+
+        # Build tree: parent_front_id -> [children sorted by position]
+        children_map: dict = defaultdict(list)
+        roots = []
         for node in nodes:
-            has_content = "✓" if node.content else "○"
-            indent = "  " * max(0, (node.depth_level or 2) - 1)
-            lines.append(
-                f"{has_content} [{node.node_type}] {indent}{node.title} (id: {node.front_id})"
-            )
+            if node.parent_front_id is None:
+                roots.append(node)
+            else:
+                children_map[node.parent_front_id].append(node)
+
+        lines = []
+
+        def render(node, depth: int) -> None:
+            indent = "  " * depth
+            lines.append(f"[{node.node_type}] {indent}{node.title} (id: {node.front_id})")
+            for child in children_map.get(node.front_id, []):
+                render(child, depth + 1)
+
+        for root in roots:
+            render(root, 0)
+
         return "\n".join(lines)
 
     return [search_book, read_chapter, list_chapters]

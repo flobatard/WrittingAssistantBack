@@ -1,6 +1,6 @@
 ✍️ Writing Assistant : L'IA au service de la narration
 
-Writing Assistant est un environnement d'écriture créative "Scrivener-like", conçu pour les auteurs modernes qui souhaitent allier le confort du Markdown à la puissance de l'Intelligence Artificielle. Plus qu'un simple éditeur, c'est un compagnon de route capable de comprendre l'intégralité d'un manuscrit pour répondre à des questions complexes sur l'intrigue, les personnages ou la cohérence du récit.
+Writing Assistant est un environnement d'écriture créative "Scrivener-like" ou sudowrite like, conçu pour les auteurs modernes qui souhaitent allier le confort du Markdown à la puissance de l'Intelligence Artificielle. Plus qu'un simple éditeur, c'est un compagnon de route capable de comprendre l'intégralité d'un manuscrit pour répondre à des questions complexes sur l'intrigue, les personnages ou la cohérence du récit.
 🏗️ Une Architecture "RAG-Native"
 
 Le cœur du projet repose sur un système de RAG (Retrieval-Augmented Generation). Contrairement à une IA classique qui oublie le début du livre au fur et à mesure de l'écriture, Writing Assistant indexe chaque paragraphe de manière sémantique.
