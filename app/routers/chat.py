@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+import json
 
 from app.core.auth import get_optional_user_sub, resolve_user_id
 from app.core.database import get_db
@@ -105,18 +106,26 @@ async def create_conversation(
 
     if payload.stream:
         async def streamer():
+            conv_data = ConversationRead.model_validate(conversation).model_dump()
+            conv_data["start_date"] = conv_data["start_date"].isoformat() if hasattr(conv_data["start_date"], "isoformat") else conv_data["start_date"]
+            yield f"event: conversation\ndata: {json.dumps(conv_data)}\n\n"
             full_response = ""
+            done_event = None
             async for event in stream_chat_with_book_history_agentic(book, payload.question, [], chat_config, embedding_config, db):
-                yield event
-                if '"full_response"' in event:
-                    import json as _json
-                    data = _json.loads(event.split("data: ", 1)[1])
+                if event.startswith("event: done"):
+                    data = json.loads(event.split("data: ", 1)[1])
                     full_response = data.get("full_response", "")
+                    done_event = event
+                else:
+                    yield event
             assistant_msg = ChatMessage(conversation_id=conversation.id, author="assistant", content=full_response)
             db.add(assistant_msg)
             title = await asyncio.to_thread(generate_conversation_title, payload.question, full_response, chat_config)
             conversation.title = title
             await db.flush()
+            yield f"event: conversation_title\ndata: {json.dumps({'title': title})}\n\n"
+            if done_event:
+                yield done_event
 
         return StreamingResponse(
             streamer(),
@@ -143,6 +152,7 @@ async def create_conversation(
         message=ChatMessageRead.model_validate(assistant_msg),
         answer=result["answer"],
         sources=result["sources"],
+        tool_steps=result["tool_steps"],
     )
 
 
@@ -208,4 +218,5 @@ async def send_message(
         message=ChatMessageRead.model_validate(assistant_msg),
         answer=result["answer"],
         sources=result["sources"],
+        tool_steps=result["tool_steps"],
     )

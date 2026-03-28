@@ -29,14 +29,22 @@ class ConversationChatRequest(BaseModel):
     stream: bool = False
 
 
+class ToolStep(BaseModel):
+    tool: str
+    args: dict
+    result: str
+
+
 class ConversationChatResponse(BaseModel):
     conversation: ConversationRead
     message: ChatMessageRead
     answer: str
     sources: list[dict]
+    tool_steps: list[ToolStep] = []
 
 
 class MessageChatResponse(BaseModel):
     message: ChatMessageRead
     answer: str
     sources: list[dict]
+    tool_steps: list[ToolStep] = []

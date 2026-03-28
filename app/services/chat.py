@@ -182,9 +182,8 @@ async def stream_chat_with_book_history_agentic(
     messages.append(HumanMessage(content=question))
 
     full_response = ""
+    tool_steps = []
     MAX_ITER = 6
-
-    print("COUCOU")
 
     for _ in range(MAX_ITER):
         accumulated: AIMessageChunk | None = None
@@ -199,7 +198,6 @@ async def stream_chat_with_book_history_agentic(
             break
 
         messages.append(accumulated)
-        print("MESSAGES: ", messages)
 
         if not accumulated.tool_calls:
             break
@@ -212,13 +210,12 @@ async def stream_chat_with_book_history_agentic(
                 result = await tool_fn.ainvoke(tc["args"])
             except Exception as e:
                 result = f"Tool error: {e}"
-            messages.append(ToolMessage(content=str(result), tool_call_id=tc["id"]))
-            yield _sse_event("tool_result", {
-                "tool": tc["name"],
-                "result_length": len(str(result)),
-            })
+            result_str = str(result)
+            tool_steps.append({"tool": tc["name"], "args": tc["args"], "result": result_str})
+            messages.append(ToolMessage(content=result_str, tool_call_id=tc["id"]))
+            yield _sse_event("tool_result", {"tool": tc["name"], "result": result_str})
 
-    yield _sse_event("done", {"full_response": full_response, "sources": []})
+    yield _sse_event("done", {"full_response": full_response, "sources": [], "tool_steps": tool_steps})
 
 
 async def chat_with_book_history_agentic(
@@ -241,13 +238,12 @@ async def chat_with_book_history_agentic(
     messages.append(HumanMessage(content=question))
 
     full_response = ""
+    tool_steps = []
     MAX_ITER = 6
 
     for _ in range(MAX_ITER):
         response = await llm.ainvoke(messages)
         messages.append(response)
-
-        print("Response: ", response)
 
         if not response.tool_calls:
             full_response = response.content
@@ -259,6 +255,8 @@ async def chat_with_book_history_agentic(
                 result = await tool_fn.ainvoke(tc["args"])
             except Exception as e:
                 result = f"Tool error: {e}"
-            messages.append(ToolMessage(content=str(result), tool_call_id=tc["id"]))
+            result_str = str(result)
+            tool_steps.append({"tool": tc["name"], "args": tc["args"], "result": result_str})
+            messages.append(ToolMessage(content=result_str, tool_call_id=tc["id"]))
 
-    return {"question": question, "answer": full_response, "sources": []}
+    return {"question": question, "answer": full_response, "sources": [], "tool_steps": tool_steps}
