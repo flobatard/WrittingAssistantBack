@@ -12,7 +12,6 @@ from app.models.book import Book
 from app.models.manuscript_node import ManuscriptNode
 from app.schemas.book import BookCreate, BookRead, BookUpdate, ChatRequest, ChatResponse
 from app.services.rag import vectorize_book, query_book
-from app.services.chat import chat_with_book, stream_chat_with_book
 
 router = APIRouter(tags=["books"])
 
