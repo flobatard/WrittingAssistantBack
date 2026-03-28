@@ -28,7 +28,7 @@ def make_book_tools(book: Book, db: AsyncSession, embedding_config: EmbeddingCon
 
     @tool
     async def read_chapter(identifier: str) -> str:
-        """Read the full content of a chapter, scene, or part.
+        """Read the full content of a chapter, scene, or part, including all its children.
         Pass a front_id (UUID) or a title (partial match accepted).
         Use list_chapters first if unsure of the exact name."""
         node = None
@@ -50,15 +50,44 @@ def make_book_tools(book: Book, db: AsyncSession, embedding_config: EmbeddingCon
                 select(ManuscriptNode).where(
                     ManuscriptNode.book_id == book.id,
                     ManuscriptNode.title.ilike(f"%{identifier}%"),
-                    ManuscriptNode.content.is_not(None),
                 )
             )
             node = result.scalar_one_or_none()
         if not node:
             return f"No chapter found matching '{identifier}'."
-        if not node.content:
-            return f"'{node.title}' is a container node with no text content."
-        return f"# {node.title}\n\n{node.content}"
+
+        # Load all nodes for this book to build the subtree
+        all_result = await db.execute(
+            select(ManuscriptNode)
+            .where(ManuscriptNode.book_id == book.id)
+            .order_by(ManuscriptNode.position)
+        )
+        all_nodes = all_result.scalars().all()
+
+        children_map: dict = defaultdict(list)
+        for n in all_nodes:
+            if n.parent_front_id is not None:
+                children_map[n.parent_front_id].append(n)
+
+        parts = []
+
+        def render_node(n: ManuscriptNode, depth: int) -> None:
+            heading = "#" * min(depth + 1, 6)
+            parts.append(f"{heading} {n.title} (id: {n.front_id})")
+            if n.content:
+                parts.append(n.content)
+            for child in children_map.get(n.front_id, []):
+                render_node(child, depth + 1)
+
+        has_children = bool(children_map.get(node.front_id))
+        if not has_children:
+            # Leaf node: simple output without redundant header overhead
+            if not node.content:
+                return f"'{node.title}' has no text content."
+            return f"# {node.title} (id: {node.front_id})\n\n{node.content}"
+
+        render_node(node, 1)
+        return "\n\n".join(parts)
 
     @tool
     async def list_chapters() -> str:
