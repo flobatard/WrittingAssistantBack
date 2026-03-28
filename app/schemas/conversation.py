@@ -1,7 +1,7 @@
 from datetime import datetime
-from typing import Optional
+from typing import Annotated, Literal, Optional, Union
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class ConversationRead(BaseModel):
@@ -48,3 +48,23 @@ class MessageChatResponse(BaseModel):
     answer: str
     sources: list[dict]
     tool_steps: list[ToolStep] = []
+
+
+class TimelineMessage(BaseModel):
+    type: Literal["message"] = "message"
+    id: int
+    author: str
+    content: str
+    at: datetime
+
+
+class TimelineToolCall(BaseModel):
+    type: Literal["tool_call"] = "tool_call"
+    id: int
+    tool: str
+    args: dict
+    result: str
+    at: datetime
+
+
+TimelineEvent = Annotated[Union[TimelineMessage, TimelineToolCall], Field(discriminator="type")]
