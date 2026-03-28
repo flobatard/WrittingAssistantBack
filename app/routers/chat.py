@@ -129,6 +129,20 @@ async def get_timeline(
     return events
 
 
+@router.delete("/{book_id}/conversations/{conversation_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_conversation(
+    book_id: int,
+    conversation_id: int,
+    sub: str | None = Depends(get_optional_user_sub),
+    db: AsyncSession = Depends(get_db),
+):
+    user_id = await resolve_user_id(sub, db)
+    await _get_book_or_404(book_id, db, user_id)
+    conversation = await _get_conversation_or_404(conversation_id, book_id, db)
+    await db.delete(conversation)
+    await db.flush()
+
+
 @router.post("/{book_id}/conversations", response_model=ConversationChatResponse, status_code=status.HTTP_201_CREATED)
 async def create_conversation(
     book_id: int,
