@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
@@ -54,6 +55,7 @@ def _build_tool_calls(conversation_id: int, tool_steps: list[dict]) -> list[Chat
             args=s["args"],
             result=s["result"],
             step_order=i,
+            called_at=datetime.fromisoformat(s["called_at"]) if "called_at" in s else datetime.now(timezone.utc).replace(tzinfo=None),
         )
         for i, s in enumerate(tool_steps)
     ]
@@ -149,7 +151,8 @@ async def create_conversation(
     await db.flush()
     await db.refresh(conversation)
 
-    user_msg = ChatMessage(conversation_id=conversation.id, author="user", content=payload.question)
+    user_received_at = datetime.now(timezone.utc).replace(tzinfo=None)
+    user_msg = ChatMessage(conversation_id=conversation.id, author="user", content=payload.question, emit_date=user_received_at)
     db.add(user_msg)
     await db.flush()
     await db.refresh(user_msg)
@@ -162,8 +165,10 @@ async def create_conversation(
 
             full_response = ""
             done_data = {}
+            assistant_received_at = datetime.now(timezone.utc).replace(tzinfo=None)
             async for event in stream_chat_with_book_history_agentic(book, payload.question, [], chat_config, embedding_config, db):
                 if event.startswith("event: done"):
+                    assistant_received_at = datetime.now(timezone.utc).replace(tzinfo=None)
                     done_data = json.loads(event.split("data: ", 1)[1])
                     full_response = done_data.get("full_response", "")
                 else:
@@ -173,7 +178,7 @@ async def create_conversation(
                 db.add(tc)
             await db.flush()
 
-            assistant_msg = ChatMessage(conversation_id=conversation.id, author="assistant", content=full_response)
+            assistant_msg = ChatMessage(conversation_id=conversation.id, author="assistant", content=full_response, emit_date=assistant_received_at)
             db.add(assistant_msg)
             await db.flush()
 
@@ -192,12 +197,13 @@ async def create_conversation(
     result = await chat_with_book_history_agentic(
         book, payload.question, [], chat_config, embedding_config, db
     )
+    assistant_received_at = datetime.now(timezone.utc).replace(tzinfo=None)
 
     for tc in _build_tool_calls(conversation.id, result["tool_steps"]):
         db.add(tc)
     await db.flush()
 
-    assistant_msg = ChatMessage(conversation_id=conversation.id, author="assistant", content=result["answer"])
+    assistant_msg = ChatMessage(conversation_id=conversation.id, author="assistant", content=result["answer"], emit_date=assistant_received_at)
     db.add(assistant_msg)
     await db.flush()
     await db.refresh(assistant_msg)
@@ -242,7 +248,8 @@ async def send_message(
     )
     history = list(history_result.scalars().all())
 
-    user_msg = ChatMessage(conversation_id=conversation.id, author="user", content=payload.question)
+    user_received_at = datetime.now(timezone.utc).replace(tzinfo=None)
+    user_msg = ChatMessage(conversation_id=conversation.id, author="user", content=payload.question, emit_date=user_received_at)
     db.add(user_msg)
     await db.flush()
 
@@ -250,8 +257,10 @@ async def send_message(
         async def streamer():
             full_response = ""
             done_data = {}
+            assistant_received_at = datetime.now(timezone.utc).replace(tzinfo=None)
             async for event in stream_chat_with_book_history_agentic(book, payload.question, history, chat_config, embedding_config, db):
                 if event.startswith("event: done"):
+                    assistant_received_at = datetime.now(timezone.utc).replace(tzinfo=None)
                     done_data = json.loads(event.split("data: ", 1)[1])
                     full_response = done_data.get("full_response", "")
                 else:
@@ -261,7 +270,7 @@ async def send_message(
                 db.add(tc)
             await db.flush()
 
-            assistant_msg = ChatMessage(conversation_id=conversation.id, author="assistant", content=full_response)
+            assistant_msg = ChatMessage(conversation_id=conversation.id, author="assistant", content=full_response, emit_date=assistant_received_at)
             db.add(assistant_msg)
             await db.flush()
 
@@ -276,12 +285,13 @@ async def send_message(
     result = await chat_with_book_history_agentic(
         book, payload.question, history, chat_config, embedding_config, db
     )
+    assistant_received_at = datetime.now(timezone.utc).replace(tzinfo=None)
 
     for tc in _build_tool_calls(conversation.id, result["tool_steps"]):
         db.add(tc)
     await db.flush()
 
-    assistant_msg = ChatMessage(conversation_id=conversation.id, author="assistant", content=result["answer"])
+    assistant_msg = ChatMessage(conversation_id=conversation.id, author="assistant", content=result["answer"], emit_date=assistant_received_at)
     db.add(assistant_msg)
     await db.flush()
     await db.refresh(assistant_msg)

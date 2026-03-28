@@ -1,4 +1,5 @@
 import json
+from datetime import datetime, timezone
 from typing import AsyncGenerator
 
 from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, SystemMessage, ToolMessage
@@ -82,12 +83,13 @@ async def stream_chat_with_book_history_agentic(
             print("Tool call: ", tc)
             yield _sse_event("tool_call", {"tool": tc["name"], "args": tc["args"]})
             tool_fn = tools_by_name[tc["name"]]
+            called_at = datetime.now(timezone.utc).replace(tzinfo=None)
             try:
                 result = await tool_fn.ainvoke(tc["args"])
             except Exception as e:
                 result = f"Tool error: {e}"
             result_str = str(result)
-            tool_steps.append({"tool": tc["name"], "args": tc["args"], "result": result_str})
+            tool_steps.append({"tool": tc["name"], "args": tc["args"], "result": result_str, "called_at": called_at.isoformat()})
             messages.append(ToolMessage(content=result_str, tool_call_id=tc["id"]))
             yield _sse_event("tool_result", {"tool": tc["name"], "result": result_str})
 
@@ -127,12 +129,13 @@ async def chat_with_book_history_agentic(
 
         for tc in response.tool_calls:
             tool_fn = tools_by_name[tc["name"]]
+            called_at = datetime.now(timezone.utc).replace(tzinfo=None)
             try:
                 result = await tool_fn.ainvoke(tc["args"])
             except Exception as e:
                 result = f"Tool error: {e}"
             result_str = str(result)
-            tool_steps.append({"tool": tc["name"], "args": tc["args"], "result": result_str})
+            tool_steps.append({"tool": tc["name"], "args": tc["args"], "result": result_str, "called_at": called_at.isoformat()})
             messages.append(ToolMessage(content=result_str, tool_call_id=tc["id"]))
 
     return {"question": question, "answer": full_response, "sources": [], "tool_steps": tool_steps}
