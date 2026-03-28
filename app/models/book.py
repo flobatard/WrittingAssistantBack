@@ -36,5 +36,10 @@ class Book(Base):
     )
 
     manuscript_nodes: Mapped[list["ManuscriptNode"]] = relationship(  # noqa: F821
-        "ManuscriptNode", back_populates="book", order_by="ManuscriptNode.position", lazy="selectin"
+        "ManuscriptNode",
+        back_populates="book",
+        order_by="ManuscriptNode.position",
+        lazy="selectin",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
     )
