@@ -9,6 +9,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.core.database import Base
 
 if TYPE_CHECKING:
+    from app.models.book_commit import BookCommit
     from app.models.manuscript_node import ManuscriptNode
 
 
@@ -42,4 +43,11 @@ class Book(Base):
         lazy="selectin",
         cascade="all, delete-orphan",
         passive_deletes=True,
+    )
+    commits: Mapped[list["BookCommit"]] = relationship(  # noqa: F821
+        "BookCommit",
+        back_populates="book",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        order_by="BookCommit.created_at",
     )
