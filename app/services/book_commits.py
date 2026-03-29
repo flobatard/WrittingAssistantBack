@@ -5,7 +5,7 @@ from app.models.book import Book
 from app.models.book_commit import BookCommit
 from app.models.manuscript_node import ManuscriptNode
 from app.models.manuscript_node_snapshot import ManuscriptNodeSnapshot
-from app.schemas.book_commit import CommitRead, RestoreResult
+from app.schemas.book_commit import CommitRead
 
 
 async def create_commit(book: Book, message: str | None, db: AsyncSession) -> CommitRead:
@@ -63,7 +63,7 @@ async def get_commit_with_count(commit_id: int, book_id: int, db: AsyncSession) 
     )
 
 
-async def restore_commit(book: Book, commit_id: int, db: AsyncSession) -> RestoreResult:
+async def restore_commit(book: Book, commit_id: int, db: AsyncSession) -> Book | None:
     commit = await db.get(BookCommit, commit_id)
     if commit is None or commit.book_id != book.id:
         return None
@@ -72,11 +72,6 @@ async def restore_commit(book: Book, commit_id: int, db: AsyncSession) -> Restor
         select(ManuscriptNodeSnapshot).where(ManuscriptNodeSnapshot.commit_id == commit_id)
     )
     snapshots = snapshots_result.scalars().all()
-
-    count_result = await db.execute(
-        select(func.count()).where(ManuscriptNode.book_id == book.id)
-    )
-    previous_count = count_result.scalar_one()
 
     existing_result = await db.execute(
         select(ManuscriptNode).where(ManuscriptNode.book_id == book.id)
@@ -101,9 +96,5 @@ async def restore_commit(book: Book, commit_id: int, db: AsyncSession) -> Restor
     ]
     db.add_all(restored_nodes)
     await db.flush()
-
-    return RestoreResult(
-        commit_id=commit_id,
-        nodes_restored=len(restored_nodes),
-        nodes_replaced=previous_count,
-    )
+    await db.refresh(book)
+    return book

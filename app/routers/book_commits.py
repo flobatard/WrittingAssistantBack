@@ -7,11 +7,11 @@ from app.core.dependancies import get_book_for_user
 from app.models.book import Book
 from app.models.book_commit import BookCommit
 from app.models.manuscript_node_snapshot import ManuscriptNodeSnapshot
+from app.schemas.book import BookRead
 from app.schemas.book_commit import (
     CommitCreate,
     CommitRead,
     ManuscriptNodeSnapshotRead,
-    RestoreResult,
 )
 from app.services.book_commits import create_commit, get_commit_with_count, restore_commit
 
@@ -96,7 +96,7 @@ async def get_commit_nodes(
     return result.scalars().all()
 
 
-@router.post("/{book_id}/commits/{commit_id}/restore", response_model=RestoreResult)
+@router.post("/{book_id}/commits/{commit_id}/restore", response_model=BookRead)
 async def restore_book_commit(
     commit_id: int,
     book: Book = Depends(get_book_for_user),

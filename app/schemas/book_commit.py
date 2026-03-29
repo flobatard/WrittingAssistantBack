@@ -34,8 +34,3 @@ class ManuscriptNodeSnapshotRead(BaseModel):
     depth_level: int
 
 
-class RestoreResult(BaseModel):
-    commit_id: int
-    nodes_restored: int
-    nodes_replaced: int
-    requires_revectorization: bool = True
