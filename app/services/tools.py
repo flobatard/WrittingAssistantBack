@@ -126,4 +126,25 @@ def make_book_tools(book: Book, db: AsyncSession, embedding_config: EmbeddingCon
 
         return "\n".join(lines)
 
-    return [search_book, read_chapter, list_chapters]
+    @tool
+    def propose_node_edit(front_id: str, new_content: str) -> str:
+        """Propose editing the full content of an existing chapter or scene.
+        The user must approve before the edit is applied. This pauses the agent.
+        Use this ONLY when the user explicitly asks you to rewrite or modify existing content.
+        - front_id: UUID string of the node to edit (get it from list_chapters or read_chapter)
+        - new_content: the full replacement text content"""
+        return "propose_node_edit acknowledged – awaiting human approval."
+
+    @tool
+    def propose_new_node(title: str, content: str, parent_front_id: str | None = None, node_type: str = "scene", position: float = 9999.0) -> str:
+        """Propose adding a new chapter or scene to the manuscript.
+        The user must approve before the node is created. This pauses the agent.
+        Use this ONLY when the user explicitly asks you to add new content.
+        - title: title of the new node
+        - content: full text content
+        - parent_front_id: (optional) UUID string of the parent node
+        - node_type: 'chapter', 'scene', 'part', 'interlude', etc.
+        - position: float ordering among siblings (default 9999.0 places it at the end)"""
+        return "propose_new_node acknowledged – awaiting human approval."
+
+    return [search_book, read_chapter, list_chapters, propose_node_edit, propose_new_node]

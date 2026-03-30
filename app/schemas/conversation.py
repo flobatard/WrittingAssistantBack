@@ -21,6 +21,19 @@ class ChatMessageRead(BaseModel):
     emit_date: datetime
     author: str
     content: str
+    tool_call_id: Optional[int] = None
+
+
+class ResumeAgentRequest(BaseModel):
+    tool_call_id: int
+    user_decision: Literal["accept", "reject"]
+    modified_content: Optional[str] = None
+    feedback: Optional[str] = None
+
+
+class ResumeAgentResponse(BaseModel):
+    status: str
+    tool_call_id: int
 
 
 class ConversationChatRequest(BaseModel):
