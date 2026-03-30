@@ -1,7 +1,7 @@
 from datetime import datetime
-from typing import Annotated, Literal, Optional, Union
+from typing import Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 
 class ConversationRead(BaseModel):
@@ -13,19 +13,23 @@ class ConversationRead(BaseModel):
     start_date: datetime
 
 
-class ChatMessageRead(BaseModel):
+class ChatEventRead(BaseModel):
     model_config = {"from_attributes": True}
 
     id: int
     conversation_id: int
-    emit_date: datetime
-    author: str
-    content: str
-    tool_call_id: Optional[int] = None
+    role: str
+    content: Optional[str] = None
+    tool_calls: Optional[list] = None
+    tool_call_id: Optional[str] = None
+    tool_name: Optional[str] = None
+    tool_args: Optional[dict] = None
+    status: str
+    created_at: datetime
 
 
 class ResumeAgentRequest(BaseModel):
-    tool_call_id: int
+    tool_call_id: int  # ChatEvent.id of the pending assistant event
     user_decision: Literal["accept", "reject"]
     modified_content: Optional[str] = None
     feedback: Optional[str] = None
@@ -42,42 +46,14 @@ class ConversationChatRequest(BaseModel):
     stream: bool = False
 
 
-class ToolStep(BaseModel):
-    tool: str
-    args: dict
-    result: str
-
-
 class ConversationChatResponse(BaseModel):
     conversation: ConversationRead
-    message: ChatMessageRead
+    message: ChatEventRead
     answer: str
     sources: list[dict]
-    tool_steps: list[ToolStep] = []
 
 
 class MessageChatResponse(BaseModel):
-    message: ChatMessageRead
+    message: ChatEventRead
     answer: str
     sources: list[dict]
-    tool_steps: list[ToolStep] = []
-
-
-class TimelineMessage(BaseModel):
-    type: Literal["message"] = "message"
-    id: int
-    author: str
-    content: str
-    at: datetime
-
-
-class TimelineToolCall(BaseModel):
-    type: Literal["tool_call"] = "tool_call"
-    id: int
-    tool: str
-    args: dict
-    result: str
-    at: datetime
-
-
-TimelineEvent = Annotated[Union[TimelineMessage, TimelineToolCall], Field(discriminator="type")]

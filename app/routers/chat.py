@@ -1,31 +1,27 @@
 import asyncio
-from datetime import datetime, timezone
+import json
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage, messages_from_dict
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-import json
 
 from app.core.auth import get_optional_user_sub, resolve_user_id
 from app.core.database import get_db
 from app.core.dependancies import ChatConfig, EmbeddingConfig, get_chat_config, get_embedding_config
 from app.models.book import Book
-from app.models.conversation import ChatMessage, ChatToolCall, Conversation
+from app.models.conversation import ChatEvent, Conversation
 from app.models.manuscript_node import ManuscriptNode
 from app.schemas.conversation import (
-    ChatMessageRead,
+    ChatEventRead,
     ConversationChatRequest,
     ConversationChatResponse,
     ConversationRead,
     MessageChatResponse,
     ResumeAgentRequest,
     ResumeAgentResponse,
-    TimelineEvent,
-    TimelineMessage,
-    TimelineToolCall,
 )
 from app.services.book_commits import create_commit
 from app.services.chat import (
@@ -54,19 +50,20 @@ async def _get_conversation_or_404(conversation_id: int, book_id: int, db: Async
     return conversation
 
 
-def _build_tool_calls(conversation_id: int, tool_steps: list[dict], step_offset: int = 0) -> list[ChatToolCall]:
-    return [
-        ChatToolCall(
-            conversation_id=conversation_id,
-            tool=s["tool"],
-            args=s["args"],
-            result=s["result"],
-            step_order=step_offset + i,
-            called_at=datetime.fromisoformat(s["called_at"]) if "called_at" in s else datetime.now(timezone.utc).replace(tzinfo=None),
-            status="completed",
-        )
-        for i, s in enumerate(tool_steps)
-    ]
+def _events_to_lc_messages(events: list[ChatEvent]) -> list:
+    """Convert ordered ChatEvent rows into LangChain messages for history reconstruction."""
+    result = []
+    for e in events:
+        if e.role == "user":
+            result.append(HumanMessage(content=e.content))
+        elif e.role == "assistant":
+            if e.tool_calls:
+                result.append(AIMessage(content=e.content or "", tool_calls=e.tool_calls))
+            else:
+                result.append(AIMessage(content=e.content or ""))
+        elif e.role == "tool":
+            result.append(ToolMessage(content=e.content, tool_call_id=e.tool_call_id or "unknown"))
+    return result
 
 
 @router.get("/{book_id}/conversations", response_model=list[ConversationRead])
@@ -85,7 +82,7 @@ async def list_conversations(
     return result.scalars().all()
 
 
-@router.get("/{book_id}/conversations/{conversation_id}/messages", response_model=list[ChatMessageRead])
+@router.get("/{book_id}/conversations/{conversation_id}/messages", response_model=list[ChatEventRead])
 async def list_messages(
     book_id: int,
     conversation_id: int,
@@ -96,14 +93,14 @@ async def list_messages(
     await _get_book_or_404(book_id, db, user_id)
     await _get_conversation_or_404(conversation_id, book_id, db)
     result = await db.execute(
-        select(ChatMessage)
-        .where(ChatMessage.conversation_id == conversation_id)
-        .order_by(ChatMessage.emit_date.asc())
+        select(ChatEvent)
+        .where(ChatEvent.conversation_id == conversation_id)
+        .order_by(ChatEvent.id.asc())
     )
     return result.scalars().all()
 
 
-@router.get("/{book_id}/conversations/{conversation_id}/timeline", response_model=list[TimelineEvent])
+@router.get("/{book_id}/conversations/{conversation_id}/timeline", response_model=list[ChatEventRead])
 async def get_timeline(
     book_id: int,
     conversation_id: int,
@@ -113,28 +110,12 @@ async def get_timeline(
     user_id = await resolve_user_id(sub, db)
     await _get_book_or_404(book_id, db, user_id)
     await _get_conversation_or_404(conversation_id, book_id, db)
-
-    messages_result = await db.execute(
-        select(ChatMessage)
-        .where(ChatMessage.conversation_id == conversation_id)
-        .order_by(ChatMessage.emit_date.asc())
+    result = await db.execute(
+        select(ChatEvent)
+        .where(ChatEvent.conversation_id == conversation_id)
+        .order_by(ChatEvent.id.asc())
     )
-    tool_calls_result = await db.execute(
-        select(ChatToolCall)
-        .where(ChatToolCall.conversation_id == conversation_id)
-        .order_by(ChatToolCall.called_at.asc(), ChatToolCall.step_order.asc())
-    )
-
-    events: list[TimelineMessage | TimelineToolCall] = []
-    for m in messages_result.scalars().all():
-        events.append(TimelineMessage(id=m.id, author=m.author, content=m.content, at=m.emit_date))
-    for tc in tool_calls_result.scalars().all():
-        events.append(TimelineToolCall(id=tc.id, tool=tc.tool, args=tc.args, result=tc.result, at=tc.called_at))
-
-    # tool_calls are saved before the assistant message, so timestamp ordering is natural.
-    # tie-break: tool_calls (False) before messages (True) when timestamps are identical.
-    events.sort(key=lambda e: (e.at, e.type == "message"))
-    return events
+    return result.scalars().all()
 
 
 @router.delete("/{book_id}/conversations/{conversation_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -173,11 +154,11 @@ async def create_conversation(
     await db.flush()
     await db.refresh(conversation)
 
-    user_received_at = datetime.now(timezone.utc).replace(tzinfo=None)
-    user_msg = ChatMessage(conversation_id=conversation.id, author="user", content=payload.question, emit_date=user_received_at)
-    db.add(user_msg)
+    user_event = ChatEvent(conversation_id=conversation.id, role="user", content=payload.question, status="done")
+    db.add(user_event)
     await db.flush()
-    await db.refresh(user_msg)
+
+    lc_history = [SystemMessage(content=_AGENTIC_SYSTEM), HumanMessage(content=payload.question)]
 
     if payload.stream:
         async def streamer():
@@ -186,38 +167,23 @@ async def create_conversation(
             yield f"event: conversation\ndata: {json.dumps(conv_data)}\n\n"
 
             full_response = ""
-            done_data = {}
-            assistant_received_at = datetime.now(timezone.utc).replace(tzinfo=None)
             async for event in stream_chat_with_book_history_agentic(
-                book, payload.question, [], chat_config, embedding_config, db,
+                book, lc_history, chat_config, embedding_config, db,
                 conversation_id=conversation.id,
             ):
-                if event.startswith("event: done"):
-                    assistant_received_at = datetime.now(timezone.utc).replace(tzinfo=None)
+                if event.startswith("event: human_in_the_loop"):
+                    yield event
+                    return
+                elif event.startswith("event: done"):
                     done_data = json.loads(event.split("data: ", 1)[1])
                     full_response = done_data.get("full_response", "")
-                elif event.startswith("event: human_in_the_loop"):
+                    title = await asyncio.to_thread(generate_conversation_title, payload.question, full_response, chat_config)
+                    conversation.title = title
+                    await db.flush()
+                    yield f"event: conversation_title\ndata: {json.dumps({'title': title})}\n\n"
                     yield event
-                    return  # HITL: stream closed, no assistant message saved
                 else:
                     yield event
-
-            if not done_data:
-                return
-
-            for tc in _build_tool_calls(conversation.id, done_data.get("tool_steps", [])):
-                db.add(tc)
-            await db.flush()
-
-            assistant_msg = ChatMessage(conversation_id=conversation.id, author="assistant", content=full_response, emit_date=assistant_received_at)
-            db.add(assistant_msg)
-            await db.flush()
-
-            title = await asyncio.to_thread(generate_conversation_title, payload.question, full_response, chat_config)
-            conversation.title = title
-            await db.flush()
-            yield f"event: conversation_title\ndata: {json.dumps({'title': title})}\n\n"
-            yield f"event: done\ndata: {json.dumps(done_data)}\n\n"
 
         return StreamingResponse(
             streamer(),
@@ -226,18 +192,17 @@ async def create_conversation(
         )
 
     result = await chat_with_book_history_agentic(
-        book, payload.question, [], chat_config, embedding_config, db
+        book, lc_history, chat_config, embedding_config, db,
+        conversation_id=conversation.id,
     )
-    assistant_received_at = datetime.now(timezone.utc).replace(tzinfo=None)
 
-    for tc in _build_tool_calls(conversation.id, result["tool_steps"]):
-        db.add(tc)
-    await db.flush()
-
-    assistant_msg = ChatMessage(conversation_id=conversation.id, author="assistant", content=result["answer"], emit_date=assistant_received_at)
-    db.add(assistant_msg)
-    await db.flush()
-    await db.refresh(assistant_msg)
+    final_event_result = await db.execute(
+        select(ChatEvent)
+        .where(ChatEvent.conversation_id == conversation.id, ChatEvent.role == "assistant")
+        .order_by(ChatEvent.id.desc())
+        .limit(1)
+    )
+    final_event = final_event_result.scalar_one()
 
     title = await asyncio.to_thread(generate_conversation_title, payload.question, result["answer"], chat_config)
     conversation.title = title
@@ -246,10 +211,9 @@ async def create_conversation(
 
     return ConversationChatResponse(
         conversation=ConversationRead.model_validate(conversation),
-        message=ChatMessageRead.model_validate(assistant_msg),
+        message=ChatEventRead.model_validate(final_event),
         answer=result["answer"],
         sources=result["sources"],
-        tool_steps=result["tool_steps"],
     )
 
 
@@ -272,49 +236,32 @@ async def send_message(
         )
     conversation = await _get_conversation_or_404(conversation_id, book_id, db)
 
-    history_result = await db.execute(
-        select(ChatMessage)
-        .where(ChatMessage.conversation_id == conversation_id)
-        .order_by(ChatMessage.emit_date.asc())
+    existing_result = await db.execute(
+        select(ChatEvent)
+        .where(ChatEvent.conversation_id == conversation_id)
+        .order_by(ChatEvent.id.asc())
     )
-    history = list(history_result.scalars().all())
+    existing_events = list(existing_result.scalars().all())
 
-    user_received_at = datetime.now(timezone.utc).replace(tzinfo=None)
-    user_msg = ChatMessage(conversation_id=conversation.id, author="user", content=payload.question, emit_date=user_received_at)
-    db.add(user_msg)
+    user_event = ChatEvent(conversation_id=conversation.id, role="user", content=payload.question, status="done")
+    db.add(user_event)
     await db.flush()
+
+    lc_history = [SystemMessage(content=_AGENTIC_SYSTEM)]
+    lc_history.extend(_events_to_lc_messages(existing_events))
+    lc_history.append(HumanMessage(content=payload.question))
 
     if payload.stream:
         async def streamer():
-            full_response = ""
-            done_data = {}
-            assistant_received_at = datetime.now(timezone.utc).replace(tzinfo=None)
             async for event in stream_chat_with_book_history_agentic(
-                book, payload.question, history, chat_config, embedding_config, db,
+                book, lc_history, chat_config, embedding_config, db,
                 conversation_id=conversation_id,
             ):
-                if event.startswith("event: done"):
-                    assistant_received_at = datetime.now(timezone.utc).replace(tzinfo=None)
-                    done_data = json.loads(event.split("data: ", 1)[1])
-                    full_response = done_data.get("full_response", "")
-                elif event.startswith("event: human_in_the_loop"):
+                if event.startswith("event: human_in_the_loop"):
                     yield event
-                    return  # HITL: stream closed, no assistant message saved
+                    return
                 else:
                     yield event
-
-            if not done_data:
-                return
-
-            for tc in _build_tool_calls(conversation.id, done_data.get("tool_steps", [])):
-                db.add(tc)
-            await db.flush()
-
-            assistant_msg = ChatMessage(conversation_id=conversation.id, author="assistant", content=full_response, emit_date=assistant_received_at)
-            db.add(assistant_msg)
-            await db.flush()
-
-            yield f"event: done\ndata: {json.dumps(done_data)}\n\n"
 
         return StreamingResponse(
             streamer(),
@@ -323,24 +270,22 @@ async def send_message(
         )
 
     result = await chat_with_book_history_agentic(
-        book, payload.question, history, chat_config, embedding_config, db
+        book, lc_history, chat_config, embedding_config, db,
+        conversation_id=conversation_id,
     )
-    assistant_received_at = datetime.now(timezone.utc).replace(tzinfo=None)
 
-    for tc in _build_tool_calls(conversation.id, result["tool_steps"]):
-        db.add(tc)
-    await db.flush()
-
-    assistant_msg = ChatMessage(conversation_id=conversation.id, author="assistant", content=result["answer"], emit_date=assistant_received_at)
-    db.add(assistant_msg)
-    await db.flush()
-    await db.refresh(assistant_msg)
+    final_event_result = await db.execute(
+        select(ChatEvent)
+        .where(ChatEvent.conversation_id == conversation_id, ChatEvent.role == "assistant")
+        .order_by(ChatEvent.id.desc())
+        .limit(1)
+    )
+    final_event = final_event_result.scalar_one()
 
     return MessageChatResponse(
-        message=ChatMessageRead.model_validate(assistant_msg),
+        message=ChatEventRead.model_validate(final_event),
         answer=result["answer"],
         sources=result["sources"],
-        tool_steps=result["tool_steps"],
     )
 
 
@@ -356,17 +301,22 @@ async def resume_agent(
     book = await _get_book_or_404(book_id, db, user_id)
     await _get_conversation_or_404(conversation_id, book_id, db)
 
-    hitl_tc = await db.get(ChatToolCall, payload.tool_call_id)
-    if not hitl_tc or hitl_tc.conversation_id != conversation_id:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tool call not found")
-    if hitl_tc.status != "pending_approval":
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Tool call is not pending approval")
+    pending_event = await db.get(ChatEvent, payload.tool_call_id)
+    if not pending_event or pending_event.conversation_id != conversation_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Event not found")
+    if pending_event.status != "pending":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Event is not pending approval")
+
+    hitl_tc = pending_event.tool_calls[0]
+    tool_name = hitl_tc["name"]
+    tool_args = hitl_tc["args"]
+    llm_tool_call_id = hitl_tc["id"]
 
     if payload.user_decision == "accept":
         await create_commit(book, "Pre-AI edit snapshot", db)
 
-        if hitl_tc.tool == "propose_node_edit":
-            front_id = UUID(hitl_tc.args["front_id"])
+        if tool_name == "propose_node_edit":
+            front_id = UUID(tool_args["front_id"])
             node_result = await db.execute(
                 select(ManuscriptNode).where(
                     ManuscriptNode.front_id == front_id,
@@ -376,49 +326,49 @@ async def resume_agent(
             node = node_result.scalar_one_or_none()
             if node is None:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Target node not found")
-            node.content = payload.modified_content if payload.modified_content is not None else hitl_tc.args["new_content"]
+            node.content = payload.modified_content if payload.modified_content is not None else tool_args["new_content"]
             await db.flush()
 
-        elif hitl_tc.tool == "propose_new_node":
-            args = hitl_tc.args
+        elif tool_name == "propose_new_node":
             new_node = ManuscriptNode(
                 book_id=book_id,
-                title=args["title"],
-                content=payload.modified_content if payload.modified_content is not None else args["content"],
-                parent_front_id=UUID(args["parent_front_id"]) if args.get("parent_front_id") else None,
-                node_type=args.get("node_type", "scene"),
-                position=float(args.get("position", 9999.0)),
+                title=tool_args["title"],
+                content=payload.modified_content if payload.modified_content is not None else tool_args["content"],
+                parent_front_id=UUID(tool_args["parent_front_id"]) if tool_args.get("parent_front_id") else None,
+                node_type=tool_args.get("node_type", "scene"),
+                position=float(tool_args.get("position", 9999.0)),
                 is_numbered=True,
                 depth_level=2,
             )
             db.add(new_node)
             await db.flush()
 
-        observation = f"Observation: The user ACCEPTED the {hitl_tc.tool} proposal."
+        observation = f"Observation: The user ACCEPTED the {tool_name} proposal."
         if payload.modified_content is not None:
             observation += " The user provided modified content."
         new_status = "accepted"
 
     else:
-        observation = f"Observation: The user REJECTED the {hitl_tc.tool} proposal."
+        observation = f"Observation: The user REJECTED the {tool_name} proposal."
         if payload.feedback:
             observation += f" Feedback: {payload.feedback}"
         new_status = "rejected"
 
-    tool_msg = ChatMessage(
-        conversation_id=conversation_id,
-        author="tool",
-        content=observation,
-        emit_date=datetime.now(timezone.utc).replace(tzinfo=None),
-        tool_call_id=hitl_tc.id,
-    )
-    db.add(tool_msg)
+    pending_event.status = new_status
 
-    hitl_tc.status = new_status
-    hitl_tc.result = observation
+    tool_event = ChatEvent(
+        conversation_id=conversation_id,
+        role="tool",
+        content=observation,
+        tool_call_id=llm_tool_call_id,
+        tool_name=tool_name,
+        tool_args=tool_args,
+        status=new_status,
+    )
+    db.add(tool_event)
     await db.flush()
 
-    return ResumeAgentResponse(status=new_status, tool_call_id=hitl_tc.id)
+    return ResumeAgentResponse(status=new_status, tool_call_id=pending_event.id)
 
 
 @router.post("/{book_id}/conversations/{conversation_id}/resume-stream")
@@ -434,85 +384,30 @@ async def resume_stream(
     book = await _get_book_or_404(book_id, db, user_id)
     await _get_conversation_or_404(conversation_id, book_id, db)
 
-    msgs_result = await db.execute(
-        select(ChatMessage)
-        .where(ChatMessage.conversation_id == conversation_id)
-        .order_by(ChatMessage.emit_date.asc())
+    events_result = await db.execute(
+        select(ChatEvent)
+        .where(ChatEvent.conversation_id == conversation_id)
+        .order_by(ChatEvent.id.asc())
     )
-    db_messages = list(msgs_result.scalars().all())
+    all_events = list(events_result.scalars().all())
 
-    tcs_result = await db.execute(
-        select(ChatToolCall)
-        .where(ChatToolCall.conversation_id == conversation_id)
-    )
-    tool_calls_by_id = {tc.id: tc for tc in tcs_result.scalars().all()}
-
-    # Count already-persisted non-pending tool calls for step_order offset
-    step_offset = sum(
-        1 for tc in tool_calls_by_id.values()
-        if tc.status in ("completed", "accepted", "rejected")
-    )
-
-    # Reconstruct full LangChain message history
-    lc_messages = [SystemMessage(content=_AGENTIC_SYSTEM)]
-    for db_msg in db_messages:
-        if db_msg.author == "user":
-            lc_messages.append(HumanMessage(content=db_msg.content))
-        elif db_msg.author == "assistant":
-            lc_messages.append(AIMessage(content=db_msg.content))
-        elif db_msg.author == "tool":
-            linked_tc = tool_calls_by_id.get(db_msg.tool_call_id) if db_msg.tool_call_id else None
-            if linked_tc and linked_tc.ai_message_dump:
-                # Reinsert the AIMessage-with-tool-calls that triggered this ToolMessage
-                lc_messages.extend(messages_from_dict(linked_tc.ai_message_dump))
-            lc_messages.append(ToolMessage(
-                content=db_msg.content,
-                tool_call_id=linked_tc.llm_tool_call_id if linked_tc else "unknown",
-            ))
+    lc_history = [SystemMessage(content=_AGENTIC_SYSTEM)]
+    lc_history.extend(_events_to_lc_messages(all_events))
 
     async def streamer():
-        full_response = ""
-        done_data = {}
-        assistant_received_at = datetime.now(timezone.utc).replace(tzinfo=None)
-
         async for event in stream_chat_with_book_history_agentic(
             book=book,
-            question=None,
-            history=[],
+            lc_history=lc_history,
             chat_config=chat_config,
             embedding_config=embedding_config,
             db=db,
             conversation_id=conversation_id,
-            step_offset=step_offset,
-            pre_built_messages=lc_messages,
         ):
-            if event.startswith("event: done"):
-                assistant_received_at = datetime.now(timezone.utc).replace(tzinfo=None)
-                done_data = json.loads(event.split("data: ", 1)[1])
-                full_response = done_data.get("full_response", "")
-            elif event.startswith("event: human_in_the_loop"):
+            if event.startswith("event: human_in_the_loop"):
                 yield event
-                return  # another HITL interrupt; no assistant message saved
+                return
             else:
                 yield event
-
-        if not done_data:
-            return
-
-        for tc in _build_tool_calls(conversation_id, done_data.get("tool_steps", []), step_offset=step_offset):
-            db.add(tc)
-        await db.flush()
-
-        assistant_msg = ChatMessage(
-            conversation_id=conversation_id,
-            author="assistant",
-            content=full_response,
-            emit_date=assistant_received_at,
-        )
-        db.add(assistant_msg)
-        await db.flush()
-
-        yield f"event: done\ndata: {json.dumps(done_data)}\n\n"
 
     return StreamingResponse(
         streamer(),

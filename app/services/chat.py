@@ -1,14 +1,13 @@
 import json
-from datetime import datetime, timezone
 from typing import AsyncGenerator
 
-from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, SystemMessage, ToolMessage, messages_to_dict
+from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, ToolMessage
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.services.tools import make_book_tools
 
 from app.core.dependancies import ChatConfig, EmbeddingConfig
 from app.models.book import Book
-from app.models.conversation import ChatToolCall
+from app.models.conversation import ChatEvent
 from app.services.chat_factory import get_chat
 
 HITL_TOOLS = {"propose_new_node", "propose_node_edit"}
@@ -61,31 +60,19 @@ def generate_conversation_title(
 
 async def stream_chat_with_book_history_agentic(
     book: Book,
-    question: str | None,
-    history: list,
+    lc_history: list,
     chat_config: ChatConfig,
     embedding_config: EmbeddingConfig,
     db: AsyncSession,
     conversation_id: int | None = None,
-    step_offset: int = 0,
-    pre_built_messages: list | None = None,
 ) -> AsyncGenerator[str, None]:
 
     tools = make_book_tools(book, db, embedding_config)
     llm = get_chat(chat_config).bind_tools(tools)
     tools_by_name = {t.name: t for t in tools}
 
-    if pre_built_messages is not None:
-        messages = pre_built_messages
-    else:
-        messages = [SystemMessage(content=_AGENTIC_SYSTEM)]
-        for msg in history:
-            cls = HumanMessage if msg.author == "user" else AIMessage
-            messages.append(cls(content=msg.content))
-        messages.append(HumanMessage(content=question))
-
+    messages = lc_history
     full_response = ""
-    tool_steps = []
     MAX_ITER = 6
 
     for _ in range(MAX_ITER):
@@ -100,100 +87,103 @@ async def stream_chat_with_book_history_agentic(
         if accumulated is None:
             break
 
-        messages.append(accumulated)
+        ai_msg = AIMessage(
+            content=accumulated.content or "",
+            tool_calls=list(accumulated.tool_calls) if accumulated.tool_calls else [],
+        )
+        messages.append(ai_msg)
 
-        if not accumulated.tool_calls:
+        if not ai_msg.tool_calls:
+            if conversation_id is not None:
+                db.add(ChatEvent(
+                    conversation_id=conversation_id,
+                    role="assistant",
+                    content=ai_msg.content,
+                    status="done",
+                ))
+                await db.flush()
             break
 
-        for tc in accumulated.tool_calls:
-            print("Tool call: ", tc)
+        for tc in ai_msg.tool_calls:
             yield _sse_event("tool_call", {"tool": tc["name"], "args": tc["args"]})
 
-            if tc["name"] in HITL_TOOLS:
-                if conversation_id is not None:
-                    # Persist any regular tool_steps accumulated so far
-                    current_order = step_offset
-                    for s in tool_steps:
-                        db.add(ChatToolCall(
-                            conversation_id=conversation_id,
-                            tool=s["tool"],
-                            args=s["args"],
-                            result=s["result"],
-                            called_at=datetime.fromisoformat(s["called_at"]),
-                            step_order=current_order,
-                            status="completed",
-                        ))
-                        current_order += 1
-                    await db.flush()
+        hitl_tc = next((tc for tc in ai_msg.tool_calls if tc["name"] in HITL_TOOLS), None)
 
-                    # Serialize the AIMessage that produced this HITL tool call
-                    ai_msg = AIMessage(
-                        content=accumulated.content,
-                        tool_calls=list(accumulated.tool_calls),
-                        additional_kwargs=accumulated.additional_kwargs,
-                        response_metadata=getattr(accumulated, "response_metadata", {}),
-                    )
-                    dump = messages_to_dict([ai_msg])
+        if hitl_tc is not None:
+            if conversation_id is not None:
+                ai_event = ChatEvent(
+                    conversation_id=conversation_id,
+                    role="assistant",
+                    content=ai_msg.content or None,
+                    tool_calls=ai_msg.tool_calls,
+                    status="pending",
+                )
+                db.add(ai_event)
+                await db.flush()
+                await db.refresh(ai_event)
 
-                    # Persist the HITL tool call as pending_approval
-                    hitl_tc = ChatToolCall(
-                        conversation_id=conversation_id,
-                        tool=tc["name"],
-                        args=tc["args"],
-                        result="",
-                        called_at=datetime.now(timezone.utc).replace(tzinfo=None),
-                        step_order=current_order,
-                        status="pending_approval",
-                        llm_tool_call_id=tc["id"],
-                        ai_message_dump=dump,
-                    )
-                    db.add(hitl_tc)
-                    await db.flush()
-                    await db.refresh(hitl_tc)
+                yield _sse_event("human_in_the_loop", {
+                    "db_id": ai_event.id,
+                    "tool_call_id": hitl_tc["id"],
+                    "name": hitl_tc["name"],
+                    "args": hitl_tc["args"],
+                })
+            return  # no "done" event — stream closed for HITL
 
-                    yield _sse_event("human_in_the_loop", {
-                        "db_id": hitl_tc.id,
-                        "tool_call_id": tc["id"],
-                        "name": tc["name"],
-                        "args": tc["args"],
-                    })
-                return  # close the generator — no "done" event
+        # Regular tool calls
+        if conversation_id is not None:
+            db.add(ChatEvent(
+                conversation_id=conversation_id,
+                role="assistant",
+                content=ai_msg.content or None,
+                tool_calls=ai_msg.tool_calls,
+                status="done",
+            ))
+            await db.flush()
 
+        for tc in ai_msg.tool_calls:
             tool_fn = tools_by_name[tc["name"]]
-            called_at = datetime.now(timezone.utc).replace(tzinfo=None)
             try:
                 result = await tool_fn.ainvoke(tc["args"])
             except Exception as e:
                 result = f"Tool error: {e}"
             result_str = str(result)
-            tool_steps.append({"tool": tc["name"], "args": tc["args"], "result": result_str, "called_at": called_at.isoformat()})
+
             messages.append(ToolMessage(content=result_str, tool_call_id=tc["id"]))
             yield _sse_event("tool_result", {"tool": tc["name"], "result": result_str})
 
-    yield _sse_event("done", {"full_response": full_response, "sources": [], "tool_steps": tool_steps})
+            if conversation_id is not None:
+                db.add(ChatEvent(
+                    conversation_id=conversation_id,
+                    role="tool",
+                    content=result_str,
+                    tool_call_id=tc["id"],
+                    tool_name=tc["name"],
+                    tool_args=tc["args"],
+                    status="done",
+                ))
+
+        if conversation_id is not None:
+            await db.flush()
+
+    yield _sse_event("done", {"full_response": full_response, "sources": []})
 
 
 async def chat_with_book_history_agentic(
     book: Book,
-    question: str,
-    history: list,
+    lc_history: list,
     chat_config: ChatConfig,
     embedding_config: EmbeddingConfig,
     db: AsyncSession,
+    conversation_id: int | None = None,
 ) -> dict:
 
     tools = make_book_tools(book, db, embedding_config)
     llm = get_chat(chat_config).bind_tools(tools)
     tools_by_name = {t.name: t for t in tools}
 
-    messages = [SystemMessage(content=_AGENTIC_SYSTEM)]
-    for msg in history:
-        cls = HumanMessage if msg.author == "user" else AIMessage
-        messages.append(cls(content=msg.content))
-    messages.append(HumanMessage(content=question))
-
+    messages = lc_history
     full_response = ""
-    tool_steps = []
     MAX_ITER = 6
 
     for _ in range(MAX_ITER):
@@ -202,17 +192,47 @@ async def chat_with_book_history_agentic(
 
         if not response.tool_calls:
             full_response = response.content
+            if conversation_id is not None:
+                db.add(ChatEvent(
+                    conversation_id=conversation_id,
+                    role="assistant",
+                    content=response.content,
+                    status="done",
+                ))
+                await db.flush()
             break
+
+        if conversation_id is not None:
+            db.add(ChatEvent(
+                conversation_id=conversation_id,
+                role="assistant",
+                content=response.content or None,
+                tool_calls=list(response.tool_calls),
+                status="done",
+            ))
+            await db.flush()
 
         for tc in response.tool_calls:
             tool_fn = tools_by_name[tc["name"]]
-            called_at = datetime.now(timezone.utc).replace(tzinfo=None)
             try:
                 result = await tool_fn.ainvoke(tc["args"])
             except Exception as e:
                 result = f"Tool error: {e}"
             result_str = str(result)
-            tool_steps.append({"tool": tc["name"], "args": tc["args"], "result": result_str, "called_at": called_at.isoformat()})
             messages.append(ToolMessage(content=result_str, tool_call_id=tc["id"]))
 
-    return {"question": question, "answer": full_response, "sources": [], "tool_steps": tool_steps}
+            if conversation_id is not None:
+                db.add(ChatEvent(
+                    conversation_id=conversation_id,
+                    role="tool",
+                    content=result_str,
+                    tool_call_id=tc["id"],
+                    tool_name=tc["name"],
+                    tool_args=tc["args"],
+                    status="done",
+                ))
+
+        if conversation_id is not None:
+            await db.flush()
+
+    return {"answer": full_response, "sources": []}
