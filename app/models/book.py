@@ -31,6 +31,7 @@ class Book(Base):
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     genre: Mapped[str] = mapped_column(String(255), nullable=True)
     embedding_model_used: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    last_vectorized_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now(), onupdate=func.now()

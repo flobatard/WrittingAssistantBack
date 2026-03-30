@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
@@ -95,6 +96,7 @@ async def vectorize(
     result = vectorize_book(book, embedding_config, chapters)
 
     book.embedding_model_used = embedding_config.model
+    book.last_vectorized_at = datetime.now(timezone.utc)
     await db.flush()
 
     return result

@@ -36,6 +36,7 @@ class BookRead(BaseModel):
     title: str
     genre: Optional[str]
     embedding_model_used: Optional[str]
+    last_vectorized_at: Optional[datetime]
     created_at: datetime
     updated_at: datetime
     manuscript_nodes: list[ManuscriptNodeRead]
