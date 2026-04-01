@@ -313,36 +313,7 @@ async def resume_agent(
     llm_tool_call_id = hitl_tc["id"]
 
     if payload.user_decision == "accept":
-        await create_commit(book, "Pre-AI edit snapshot", db)
-
-        if tool_name == "propose_node_edit":
-            front_id = UUID(tool_args["front_id"])
-            node_result = await db.execute(
-                select(ManuscriptNode).where(
-                    ManuscriptNode.front_id == front_id,
-                    ManuscriptNode.book_id == book_id,
-                )
-            )
-            node = node_result.scalar_one_or_none()
-            if node is None:
-                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Target node not found")
-            node.content = payload.modified_content if payload.modified_content is not None else tool_args["new_content"]
-            await db.flush()
-
-        elif tool_name == "propose_new_node":
-            new_node = ManuscriptNode(
-                book_id=book_id,
-                title=tool_args["title"],
-                content=payload.modified_content if payload.modified_content is not None else tool_args["content"],
-                parent_front_id=UUID(tool_args["parent_front_id"]) if tool_args.get("parent_front_id") else None,
-                node_type=tool_args.get("node_type", "scene"),
-                position=float(tool_args.get("position", 9999.0)),
-                is_numbered=True,
-                depth_level=2,
-            )
-            db.add(new_node)
-            await db.flush()
-
+        # Update to database will be made throught front end update of the editor
         observation = f"Observation: The user ACCEPTED the {tool_name} proposal."
         if payload.modified_content is not None:
             observation += " The user provided modified content."
