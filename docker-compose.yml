@@ -29,6 +29,20 @@ services:
       timeout: 5s
       retries: 5
 
+  languagetool:
+    image: erikvl87/languagetool
+    restart: unless-stopped
+    ports:
+      - "8010:8010"
+    environment:
+      - Java_Xms=512m
+      - Java_Xmx=1g
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8010/v2/languages"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   api:
     build: .
     restart: unless-stopped
@@ -39,10 +53,14 @@ services:
     environment:
       CHROMA_HOST: chromadb
       CHROMA_PORT: 1
+      LANGUAGETOOL_HOST: languagetool
+      LANGUAGETOOL_PORT: 8010
     depends_on:
       db:
         condition: service_healthy
       chromadb:
+        condition: service_healthy
+      languagetool:
         condition: service_healthy
 
 volumes:

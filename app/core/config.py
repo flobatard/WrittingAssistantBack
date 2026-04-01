@@ -20,6 +20,10 @@ class Settings(BaseSettings):
     CHROMA_HOST: str = "localhost"
     CHROMA_PORT: int = 8001
 
+    # LanguageTool HTTP
+    LANGUAGETOOL_HOST: str = "localhost"
+    LANGUAGETOOL_PORT: int = 8010
+
     OIDC_ISSUER_URL: str = "http://localhost:8080/realms/writting_assistant"
     # Optionnal
     OIDC_AUDIENCE: str = ""
