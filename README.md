@@ -66,7 +66,7 @@ WrittingAssistantBack/
 
 ```bash
 cp .env.example .env
-docker-compose up -d db chromadb   # Démarrer PostgreSQL + ChromaDB
+docker-compose up -d db chromadb languagetool   # Démarrer PostgreSQL + ChromaDB + LanguageTool
 bash scripts/init.sh               # Créer la DB + appliquer les migrations
 docker-compose up --build          # Démarrer l'API
 ```
