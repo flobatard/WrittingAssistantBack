@@ -11,7 +11,7 @@ FastAPI backend for an AI-powered creative writing assistant (Scrivener-like). U
 ### Running the API
 
 ```bash
-# Docker Compose (recommended — starts PostgreSQL + API)
+# Docker Compose (recommended — starts PostgreSQL + ChromaDB + LanguageTool)
 docker-compose up --build
 
 # Local development
@@ -30,42 +30,51 @@ pip install -r requirements.txt
 ## Architecture
 
 Two storage layers:
-- **PostgreSQL** (via SQLAlchemy async + asyncpg): persists series, books, manuscript nodes, conversations and messages
+- **PostgreSQL** (via SQLAlchemy async + asyncpg): persists series, books, manuscript nodes, conversations, chat events, book commits and snapshots
 - **ChromaDB** (remote client): vector store for semantic search over manuscript content
 
 ### Project structure
 
 ```
 app/
-├── main.py                   # FastAPI app entry point — lifespan hook calls init_db()
+├── main.py                         # FastAPI app entry point — lifespan hook calls init_db()
 ├── core/
-│   ├── auth.py               # OIDC/JWT authentication (JWKS caching)
-│   ├── config.py             # Pydantic Settings — reads from .env via lru_cache
-│   ├── database.py           # Async SQLAlchemy engine, Base, get_db() dependency
-│   └── dependancies.py       # Shared dependencies: ChatConfig, EmbeddingConfig, get_book_for_user()
+│   ├── auth.py                     # OIDC/JWT authentication (JWKS caching)
+│   ├── config.py                   # Pydantic Settings — reads from .env via lru_cache
+│   ├── database.py                 # Async SQLAlchemy engine, Base, get_db() dependency
+│   └── dependancies.py             # Shared dependencies: ChatConfig, EmbeddingConfig, get_book_for_user()
 ├── models/
-│   ├── book.py               # Book ORM model (table: books)
-│   ├── manuscript_node.py    # ManuscriptNode ORM model (table: manuscript_nodes) — self-referential tree
-│   ├── series.py             # Series ORM model (table: series)
-│   ├── conversation.py       # Conversation + ChatMessage ORM models
-│   └── user.py               # User ORM model (table: users)
+│   ├── book.py                     # Book ORM model (table: books)
+│   ├── manuscript_node.py          # ManuscriptNode ORM model (table: manuscript_nodes) — self-referential tree
+│   ├── manuscript_node_snapshot.py # ManuscriptNodeSnapshot ORM model (table: manuscript_node_snapshots)
+│   ├── series.py                   # Series ORM model (table: series)
+│   ├── conversation.py             # Conversation + ChatEvent ORM models
+│   ├── book_commit.py              # BookCommit ORM model (table: book_commits)
+│   └── user.py                     # User ORM model (table: users)
 ├── schemas/
-│   ├── book.py               # BookCreate, BookUpdate, BookRead (includes manuscript_nodes list)
-│   ├── manuscript_node.py    # ManuscriptNodeCreate, ManuscriptNodeUpdate, ManuscriptNodeRead
-│   ├── series.py             # SeriesCreate, SeriesUpdate, SeriesRead
-│   ├── conversation.py       # Conversation & ChatMessage schemas
-│   └── user.py               # UserRead
+│   ├── book.py                     # BookCreate, BookUpdate, BookRead (includes manuscript_nodes list)
+│   ├── manuscript_node.py          # ManuscriptNodeCreate, ManuscriptNodeUpdate, ManuscriptNodeRead
+│   ├── series.py                   # SeriesCreate, SeriesUpdate, SeriesRead
+│   ├── conversation.py             # Conversation, ChatEventRead, ResumeAgent* schemas
+│   ├── book_commit.py              # CommitCreate, CommitRead, ManuscriptNodeSnapshotRead
+│   ├── spellcheck.py               # SpellCheckRequest schema
+│   └── user.py                     # UserRead
 ├── routers/
-│   ├── auth.py               # POST /auth/login
-│   ├── books.py              # CRUD /books/ + POST /{id}/vectorize + GET /{id}/query
-│   ├── manuscript_nodes.py   # CRUD /books/{book_id}/manuscript-nodes/
-│   ├── series.py             # CRUD /series/
-│   └── chat.py               # Conversations + streaming chat /books/chat/
+│   ├── auth.py                     # POST /auth/login
+│   ├── books.py                    # CRUD /books/ + POST /{id}/vectorize + GET /{id}/query
+│   ├── manuscript_nodes.py         # CRUD /books/{book_id}/manuscript-nodes/
+│   ├── series.py                   # CRUD /series/
+│   ├── chat.py                     # Conversations + agentic streaming chat + HITL /books/chat/
+│   ├── book_commits.py             # Snapshot-based versioning /books_commits/
+│   ├── spellcheck.py               # LanguageTool proxy /spellcheck/
+│   └── dev.py                      # Dev-only endpoints (active when APP_ENV=development)
 └── services/
-    ├── rag.py                # vectorize_book(), query_book() — chunking + ChromaDB ingestion
-    ├── chat.py               # chat_with_book_history(), stream_chat_with_book_history()
-    ├── chat_factory.py       # LLM instantiation (OpenAI-compatible)
-    └── embeddings_factory.py # Embeddings instantiation
+    ├── rag.py                      # vectorize_book(), query_book() — chunking + ChromaDB ingestion
+    ├── chat.py                     # stream_chat_with_book_history_agentic(), chat_with_book_history_agentic()
+    ├── tools.py                    # make_book_tools() — LangChain tools for the agentic loop
+    ├── book_commits.py             # create_commit(), restore_commit() — snapshot versioning
+    ├── chat_factory.py             # LLM instantiation (OpenAI-compatible)
+    └── embeddings_factory.py       # Embeddings instantiation
 ```
 
 ### Data model
@@ -73,9 +82,11 @@ app/
 ```
 series          (user_id FK → users, optional)
   └── books     (user_id FK → users, series_id FK → series, parent_book_id FK → books)
-        └── manuscript_nodes  (book_id FK → books, parent_front_id FK → manuscript_nodes.front_id — self-referential)
-              conversation     (book_id FK → books)
-                └── chat_messages
+        ├── manuscript_nodes  (book_id FK → books, parent_front_id FK → manuscript_nodes.front_id — self-referential)
+        ├── book_commits      (book_id FK → books)
+        │     └── manuscript_node_snapshots  (commit_id FK → book_commits)
+        └── conversations     (book_id FK → books)
+              └── chat_events (conversation_id FK → conversations)
 ```
 
 #### Key tables
@@ -96,7 +107,62 @@ series          (user_id FK → users, optional)
 - `is_numbered` (bool)
 - `depth_level` (int, default 2): visual/logical nesting level, maintained by the client
 
+**chat_events** — Unified event table replacing the old `chat_messages` + `chat_tool_calls` split. Every LangChain message in the agentic loop is stored as one row, ordered by PK `id` (insertion order).
+
+| Column | Type | Description |
+|---|---|---|
+| `id` | int PK | Insertion-order identifier — used for sorting |
+| `conversation_id` | int FK | → conversations.id CASCADE |
+| `role` | varchar(20) | `"user"` \| `"assistant"` \| `"tool"` |
+| `content` | TEXT NULL | Text content; null for pure tool-call AIMessages |
+| `tool_calls` | JSON NULL | `[{id, name, args, type}]` from `AIMessage.tool_calls` |
+| `tool_call_id` | varchar(255) | LLM-internal ID (ToolMessage rows only) — links a tool result back to its call |
+| `tool_name` | varchar(100) | Display name (tool rows only) |
+| `tool_args` | JSON NULL | Display args (tool rows only) |
+| `status` | varchar(30) | `"done"` \| `"pending"` \| `"accepted"` \| `"rejected"` |
+| `created_at` | datetime | |
+
+Mapping from LangChain message types:
+- `HumanMessage` → `role="user", content=...`
+- `AIMessage` (final response) → `role="assistant", content=..., tool_calls=null, status="done"`
+- `AIMessage` (tool turn) → `role="assistant", tool_calls=[{id,name,args}], status="done"`
+- `ToolMessage` → `role="tool", content=result, tool_call_id=llm_id, tool_name=..., status="done"`
+- HITL pending → `role="assistant", tool_calls=[hitl_call], status="pending"`
+- HITL resolved → `role="tool", content=observation, status="accepted"|"rejected"`
+
+**book_commits** — Snapshot of the full manuscript at a point in time.
+- `book_id` (FK → books)
+- `message` (string, optional): human-readable description
+- Related `manuscript_node_snapshots`: full copy of all nodes at commit time
+
 **series** — Groups of books (sagas). Always owned by a user (`user_id` required).
+
+### Agentic chat & Human-In-The-Loop (HITL)
+
+The chat service runs a multi-turn LangChain agentic loop (max 6 iterations). Each turn:
+1. LLM streams a response — may include tool calls
+2. Regular tools (`search_book`, `read_chapter`, `list_chapters`) execute immediately; their result is fed back to the LLM
+3. HITL tools (`propose_node_edit`, `propose_new_node`) pause the agent and require user approval before execution
+
+**Available tools** (defined in [app/services/tools.py](app/services/tools.py)):
+
+| Tool | Type | Description |
+|---|---|---|
+| `search_book` | Regular | Semantic search over vectorized manuscript content |
+| `read_chapter` | Regular | Reads the full text of a node by UUID or title |
+| `list_chapters` | Regular | Returns the full table of contents (IDs + titles) |
+| `propose_node_edit` | **HITL** | Proposes replacing an existing node's content — pauses the agent |
+| `propose_new_node` | **HITL** | Proposes creating a new node — pauses the agent |
+
+**HITL flow:**
+1. Agent calls `propose_node_edit` or `propose_new_node`
+2. Service saves a `ChatEvent(role="assistant", status="pending")` and yields a `human_in_the_loop` SSE event with `db_id`
+3. Stream closes — no `done` event
+4. Client calls `POST .../resume-agent` with `tool_call_id=db_id` and `user_decision="accept"|"reject"`
+5. Backend applies the change (accept) or records the rejection, saves a `ChatEvent(role="tool", status="accepted"|"rejected")`
+6. Client calls `POST .../resume-stream` — backend loads all events, reconstructs LangChain history, and continues the agent loop
+
+History reconstruction for `resume_stream` is trivial: query all `chat_events` ordered by `id`, then convert each row to the matching LangChain message type.
 
 ### Request flow
 
@@ -118,8 +184,14 @@ series          (user_id FK → users, optional)
 - [app/core/dependancies.py](app/core/dependancies.py) — `get_book_for_user()` (loads book + checks access), `ChatConfig`, `EmbeddingConfig`
 - [app/models/book.py](app/models/book.py) — `Book` ORM model; relationship `manuscript_nodes` loaded via `selectin`
 - [app/models/manuscript_node.py](app/models/manuscript_node.py) — `ManuscriptNode` ORM model with self-referential `parent_front_id → front_id`
+- [app/models/conversation.py](app/models/conversation.py) — `Conversation` + `ChatEvent` ORM models
 - [app/models/series.py](app/models/series.py) — `Series` ORM model
 - [app/services/rag.py](app/services/rag.py) — `vectorize_book(book, config, nodes)` — chunking + ChromaDB ingestion
+- [app/services/chat.py](app/services/chat.py) — `stream_chat_with_book_history_agentic()`, `chat_with_book_history_agentic()` — agentic loop with real-time event persistence
+- [app/services/tools.py](app/services/tools.py) — `make_book_tools(book, db, embedding_config)` — LangChain tools for the agent
+- [app/services/book_commits.py](app/services/book_commits.py) — `create_commit()`, `restore_commit()` — snapshot-based versioning
+- [app/routers/chat.py](app/routers/chat.py) — conversation CRUD, agentic chat, HITL endpoints, timeline
+- [app/routers/book_commits.py](app/routers/book_commits.py) — commit CRUD + restore
 - [migrations/](migrations/) — Alembic migration scripts
 
 ### Access control
@@ -166,7 +238,9 @@ All scripts read connection info from `DATABASE_URL` (via `app.core.config`).
 | `DATABASE_URL` | `postgresql+asyncpg://writing_user:writing_password@localhost:5430/writing_assistant` | PostgreSQL connection string |
 | `CHROMA_HOST` | `localhost` | ChromaDB host |
 | `CHROMA_PORT` | `8001` | ChromaDB port |
-| `APP_ENV` | `development` | Application environment |
+| `LANGUAGETOOL_HOST` | `localhost` | LanguageTool host |
+| `LANGUAGETOOL_PORT` | `8010` | LanguageTool port |
+| `APP_ENV` | `development` | Application environment (`development` enables dev router) |
 | `OIDC_ISSUER_URL` | `http://localhost:8080/realms/writting_assistant` | OIDC provider (Keycloak by default) |
 | `OIDC_AUDIENCE` | *(optional)* | JWT audience claim |
 
