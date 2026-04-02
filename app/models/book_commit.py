@@ -21,7 +21,7 @@ class BookCommit(Base):
         ForeignKey("books.id", ondelete="CASCADE"), nullable=False, index=True
     )
     message: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     book: Mapped[Book] = relationship("Book", back_populates="commits")
     snapshots: Mapped[list[ManuscriptNodeSnapshot]] = relationship(

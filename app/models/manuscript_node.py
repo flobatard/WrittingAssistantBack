@@ -40,9 +40,9 @@ class ManuscriptNode(Base):
     position: Mapped[float] = mapped_column(Float, nullable=False)
     is_numbered: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     depth_level: Mapped[int] = mapped_column(Integer, nullable=False, default=2)
-    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, server_default=func.now(), onupdate=func.now()
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
     book: Mapped[Book] = relationship("Book", back_populates="manuscript_nodes")

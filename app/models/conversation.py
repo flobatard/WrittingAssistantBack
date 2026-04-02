@@ -12,7 +12,7 @@ class Conversation(Base):
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
     title: Mapped[str | None] = mapped_column(String(255), nullable=True)
     book_id: Mapped[int] = mapped_column(ForeignKey("books.id", ondelete="CASCADE"), nullable=False, index=True)
-    start_date: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    start_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class ChatEvent(Base):
@@ -29,4 +29,4 @@ class ChatEvent(Base):
     tool_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
     tool_args: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     status: Mapped[str] = mapped_column(String(30), nullable=False, default="done")  # done | pending | accepted | rejected
-    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
