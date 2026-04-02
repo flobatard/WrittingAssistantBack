@@ -301,7 +301,7 @@ async def resume_agent(
     book = await _get_book_or_404(book_id, db, user_id)
     await _get_conversation_or_404(conversation_id, book_id, db)
 
-    pending_event = await db.get(ChatEvent, payload.tool_call_id)
+    pending_event = await db.get(ChatEvent, payload.chat_event_id)
     if not pending_event or pending_event.conversation_id != conversation_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Event not found")
     if pending_event.status != "pending":
@@ -339,7 +339,7 @@ async def resume_agent(
     db.add(tool_event)
     await db.flush()
 
-    return ResumeAgentResponse(status=new_status, tool_call_id=pending_event.id)
+    return ResumeAgentResponse(status=new_status, chat_event_id=pending_event.id)
 
 
 @router.post("/{book_id}/conversations/{conversation_id}/resume-stream")

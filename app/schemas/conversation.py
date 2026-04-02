@@ -29,7 +29,7 @@ class ChatEventRead(BaseModel):
 
 
 class ResumeAgentRequest(BaseModel):
-    tool_call_id: int  # ChatEvent.id of the pending assistant event
+    chat_event_id: int  # ChatEvent.id of the pending assistant event
     user_decision: Literal["accept", "reject"]
     modified_content: Optional[str] = None
     feedback: Optional[str] = None
@@ -37,7 +37,7 @@ class ResumeAgentRequest(BaseModel):
 
 class ResumeAgentResponse(BaseModel):
     status: str
-    tool_call_id: int
+    chat_event_id: int
 
 
 class ConversationChatRequest(BaseModel):

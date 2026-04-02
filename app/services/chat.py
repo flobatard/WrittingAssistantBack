@@ -123,7 +123,7 @@ async def stream_chat_with_book_history_agentic(
                 await db.refresh(ai_event)
 
                 yield _sse_event("human_in_the_loop", {
-                    "db_id": ai_event.id,
+                    "chat_event_id": ai_event.id,
                     "tool_call_id": hitl_tc["id"],
                     "name": hitl_tc["name"],
                     "args": hitl_tc["args"],
