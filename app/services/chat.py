@@ -47,6 +47,22 @@ def _sse_event(event_type: str, data: dict) -> str:
     return f"event: {event_type}\ndata: {json.dumps(data)}\n\n"
 
 
+def _content_to_str(content) -> str:
+    """Normalize LangChain chunk content to a plain string.
+
+    OpenAI/Anthropic return str; Gemini returns a list of content blocks
+    like [{"type": "text", "text": "..."}].
+    """
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "".join(
+            block.get("text", "") if isinstance(block, dict) else str(block)
+            for block in content
+        )
+    return str(content)
+
+
 def generate_conversation_title(
     question: str,
     answer: str,
@@ -86,14 +102,15 @@ async def stream_chat_with_book_history_agentic(
         async for chunk in llm.astream(messages):
             accumulated = chunk if accumulated is None else accumulated + chunk
             if chunk.content:
-                full_response += chunk.content
-                yield _sse_event("token", {"content": chunk.content})
+                text = _content_to_str(chunk.content)
+                full_response += text
+                yield _sse_event("token", {"content": text})
 
         if accumulated is None:
             break
 
         ai_msg = AIMessage(
-            content=accumulated.content or "",
+            content=_content_to_str(accumulated.content) if accumulated.content else "",
             tool_calls=list(accumulated.tool_calls) if accumulated.tool_calls else [],
         )
         messages.append(ai_msg)
