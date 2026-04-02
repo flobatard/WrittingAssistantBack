@@ -312,7 +312,25 @@ async def resume_agent(
     tool_args = hitl_tc["args"]
     llm_tool_call_id = hitl_tc["id"]
 
-    if payload.user_decision == "accept":
+    if tool_name == "ask_question":
+        if payload.user_decision == "accept":
+            user_answer = payload.answer or ""
+            observation = (
+                f"Observation: The user answered your question.\n"
+                f"Question: {tool_args.get('question', '')}\n"
+                f"Answer: {user_answer}"
+            )
+            new_status = "accepted"
+        else:
+            observation = (
+                f"Observation: The user declined to answer your question.\n"
+                f"Question: {tool_args.get('question', '')}"
+            )
+            if payload.feedback:
+                observation += f"\nFeedback: {payload.feedback}"
+            new_status = "rejected"
+
+    elif payload.user_decision == "accept":
         # Update to database will be made throught front end update of the editor
         observation = f"Observation: The user ACCEPTED the {tool_name} proposal."
         if payload.modified_content is not None:

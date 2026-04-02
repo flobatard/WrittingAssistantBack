@@ -147,4 +147,13 @@ def make_book_tools(book: Book, db: AsyncSession, embedding_config: EmbeddingCon
         - position: float ordering among siblings (default 9999.0 places it at the end)"""
         return "propose_new_node acknowledged – awaiting human approval."
 
-    return [search_book, read_chapter, list_chapters, propose_node_edit, propose_new_node]
+    @tool
+    def ask_question(question: str) -> str:
+        """Ask the user a clarifying question before proceeding.
+        Use this when you need information from the user that is not available
+        in the manuscript or previous messages.
+        - question: the exact question you want to ask the user
+        This pauses the agent until the user replies."""
+        return "ask_question acknowledged – awaiting user answer."
+
+    return [search_book, read_chapter, list_chapters, propose_node_edit, propose_new_node, ask_question]

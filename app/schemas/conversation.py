@@ -33,6 +33,7 @@ class ResumeAgentRequest(BaseModel):
     user_decision: Literal["accept", "reject"]
     modified_content: Optional[str] = None
     feedback: Optional[str] = None
+    answer: Optional[str] = None  # user's answer for ask_question tool calls
 
 
 class ResumeAgentResponse(BaseModel):

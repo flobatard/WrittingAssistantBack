@@ -10,7 +10,7 @@ from app.models.book import Book
 from app.models.conversation import ChatEvent
 from app.services.chat_factory import get_chat
 
-HITL_TOOLS = {"propose_new_node", "propose_node_edit"}
+HITL_TOOLS = {"propose_new_node", "propose_node_edit", "ask_question"}
 
 _AGENTIC_SYSTEM = (
     "You are an expert literary assistant helping the author analyze and develop their manuscript.\n"
@@ -27,7 +27,12 @@ _AGENTIC_SYSTEM = (
     "To propose changes to the manuscript, use ONLY these tools:\n"
     "- `propose_node_edit(front_id, new_content)`: propose replacing an existing node's full content\n"
     "- `propose_new_node(title, content, ...)`: propose adding a new chapter or scene\n"
-    "IMPORTANT: Call at most ONE of these tools per response. Never mix them with other tool calls in the same response. Only use them when the user explicitly requests a manuscript edit.\n\n"
+    "Only use them when the user explicitly requests a manuscript edit.\n\n"
+
+    "=== ASKING CLARIFYING QUESTIONS ===\n"
+    "If you need information from the user before you can proceed (e.g., a character name, a plot detail, a stylistic preference), use:\n"
+    "- `ask_question(question)`: pauses the agent and presents the question to the user.\n"
+    "IMPORTANT: Call at most ONE HITL tool per response (ask_question, propose_node_edit, or propose_new_node). Never combine them with each other or with other tool calls in the same response.\n\n"
 
     "CRITICAL RULES:\n"
     "- NEVER guess, hallucinate, or invent story details. If the tools don't provide the answer, say you don't know.\n"
