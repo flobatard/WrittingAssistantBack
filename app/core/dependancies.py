@@ -56,6 +56,22 @@ async def get_book_for_user(
     return book
 
 
+@dataclass
+class ProviderConfig:
+    provider: str
+    api_key: str | None
+    url: str | None
+
+async def get_provider_config(
+    x_provider: str | None = Header(default=None),
+    x_api_key: str | None = Header(default=None),
+    x_api_url: str | None = Header(default=None),
+) -> ProviderConfig:
+    if not x_provider:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="X-Provider header is required")
+    return ProviderConfig(provider=x_provider, api_key=x_api_key, url=x_api_url)
+
+
 async def get_embedding_config(
     x_embedding_provider: str | None = Header(default=None),
     x_embedding_provider_type: str | None = Header(default=None),
