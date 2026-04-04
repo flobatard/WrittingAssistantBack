@@ -68,15 +68,18 @@ def generate_conversation_title(
     answer: str,
     chat_config: ChatConfig,
 ) -> str:
-    llm = get_chat(chat_config)
-    prompt = (
-        "Based on the following question and answer from a conversation about a book, "
-        "generate a very short and concise title (maximum 8 words) that summarizes the topic.\n"
-        "Return ONLY the title, no punctuation at the end, no quotes.\n\n"
-        f"Question: {question}\nAnswer: {answer}"
-    )
-    response = llm.invoke([HumanMessage(content=prompt)])
-    return response.content.strip()
+    try:
+        llm = get_chat(chat_config)
+        prompt = (
+            "Based on the following question and answer from a conversation about a book, "
+            "generate a very short and concise title (maximum 8 words) that summarizes the topic.\n"
+            "Return ONLY the title, no punctuation at the end, no quotes.\n\n"
+            f"Question: {question}\nAnswer: {answer}"
+        )
+        response = llm.invoke([HumanMessage(content=prompt)])
+        return response.content.strip()
+    except Exception:
+        return question[:60]
 
 
 async def stream_chat_with_book_history_agentic(
@@ -99,12 +102,16 @@ async def stream_chat_with_book_history_agentic(
     for _ in range(MAX_ITER):
         accumulated: AIMessageChunk | None = None
 
-        async for chunk in llm.astream(messages):
-            accumulated = chunk if accumulated is None else accumulated + chunk
-            if chunk.content:
-                text = _content_to_str(chunk.content)
-                full_response += text
-                yield _sse_event("token", {"content": text})
+        try:
+            async for chunk in llm.astream(messages):
+                accumulated = chunk if accumulated is None else accumulated + chunk
+                if chunk.content:
+                    text = _content_to_str(chunk.content)
+                    full_response += text
+                    yield _sse_event("token", {"content": text})
+        except Exception as e:
+            yield _sse_event("error", {"message": str(e)})
+            return
 
         if accumulated is None:
             break

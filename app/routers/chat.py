@@ -191,10 +191,13 @@ async def create_conversation(
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
 
-    result = await chat_with_book_history_agentic(
-        book, lc_history, chat_config, embedding_config, db,
-        conversation_id=conversation.id,
-    )
+    try:
+        result = await chat_with_book_history_agentic(
+            book, lc_history, chat_config, embedding_config, db,
+            conversation_id=conversation.id,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e))
 
     final_event_result = await db.execute(
         select(ChatEvent)
@@ -269,10 +272,13 @@ async def send_message(
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
 
-    result = await chat_with_book_history_agentic(
-        book, lc_history, chat_config, embedding_config, db,
-        conversation_id=conversation_id,
-    )
+    try:
+        result = await chat_with_book_history_agentic(
+            book, lc_history, chat_config, embedding_config, db,
+            conversation_id=conversation_id,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e))
 
     final_event_result = await db.execute(
         select(ChatEvent)
