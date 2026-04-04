@@ -26,6 +26,7 @@ WrittingAssistantBack/
 │   │   ├── database.py                 # Moteur SQLAlchemy async + dépendance get_db
 │   │   └── dependancies.py             # get_book_for_user(), ChatConfig, EmbeddingConfig
 │   ├── models/
+│   │   ├── asset.py                    # ORM — table `assets` (World Bible : personnages, lieux…)
 │   │   ├── book.py                     # ORM — table `books`
 │   │   ├── manuscript_node.py          # ORM — table `manuscript_nodes` (arbre auto-référentiel)
 │   │   ├── manuscript_node_snapshot.py # ORM — table `manuscript_node_snapshots`
@@ -34,6 +35,7 @@ WrittingAssistantBack/
 │   │   ├── book_commit.py              # ORM — table `book_commits`
 │   │   └── user.py                     # ORM — table `users`
 │   ├── schemas/
+│   │   ├── asset.py                    # AssetCreate / AssetUpdate / AssetRead
 │   │   ├── book.py                     # BookCreate / BookUpdate / BookRead
 │   │   ├── manuscript_node.py          # ManuscriptNodeCreate / Update / Read
 │   │   ├── series.py                   # SeriesCreate / Update / Read
@@ -43,6 +45,7 @@ WrittingAssistantBack/
 │   │   └── user.py                     # UserRead
 │   ├── routers/
 │   │   ├── auth.py                     # POST /auth/login
+│   │   ├── assets.py                   # CRUD /books/{book_id}/assets/
 │   │   ├── books.py                    # CRUD /books/ + vectorize + query
 │   │   ├── manuscript_nodes.py         # CRUD /books/{book_id}/manuscript-nodes/
 │   │   ├── series.py                   # CRUD /series/
@@ -116,12 +119,24 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 series          ← saga regroupant plusieurs livres
   └── books     ← livre (standalone ou rattaché à une saga, peut être un spin-off)
+        ├── assets                 ← World Bible : personnages, lieux, objets, factions, lore…
         ├── manuscript_nodes       ← arbre hiérarchique du manuscrit
         ├── book_commits           ← instantanés du manuscrit (versioning)
         │     └── manuscript_node_snapshots
         └── conversations          ← sessions de chat liées au livre
               └── chat_events      ← événements ordonnés (messages user/IA/outil)
 ```
+
+### `assets`
+| Champ | Type | Description |
+|---|---|---|
+| `id` | UUID PK | Généré automatiquement par la DB (`gen_random_uuid()`) |
+| `book_id` | FK → books | Livre auquel l'asset appartient (cascade delete) |
+| `type` | enum | `CHARACTER`, `LOCATION`, `ITEM`, `FACTION`, `LORE`, `IMAGE` |
+| `name` | string(255) | Nom de l'asset |
+| `aliases` | text[] | Noms alternatifs (ex. pseudonymes, noms de lieu anciens…) |
+| `short_description` | TEXT nullable | Résumé court |
+| `attributes` | JSONB nullable | Champs spécifiques au type (ex. `{"age": 35, "role": "antagonist"}`) |
 
 ### `books`
 | Champ | Type | Description |
@@ -193,6 +208,18 @@ Table unifiée remplaçant les anciens `chat_messages` + `chat_tool_calls`. Chaq
 | `PATCH` | `/books/{book_id}/multiple-manuscript-nodes-update` | Créer / modifier / supprimer en batch (updates et deletes identifiés par `front_id`) |
 
 Le front reconstruit l'arbre à partir du champ `parent_front_id` renvoyé. Un nœud appartenant à un autre livre retourne `404`.
+
+### Assets (World Bible)
+
+| Méthode | Route | Description |
+|---|---|---|
+| `POST` | `/books/{book_id}/assets/` | Créer un asset |
+| `GET` | `/books/{book_id}/assets/` | Lister les assets (`?type=CHARACTER` pour filtrer par type) |
+| `GET` | `/books/{book_id}/assets/{asset_id}` | Détail d'un asset (par UUID) |
+| `PUT` | `/books/{book_id}/assets/{asset_id}` | Modifier (mise à jour partielle) |
+| `DELETE` | `/books/{book_id}/assets/{asset_id}` | Supprimer |
+
+Les assets sont également accessibles à l'agent IA via les outils `list_assets` et `read_asset`.
 
 ### RAG
 
@@ -266,6 +293,7 @@ Ces endpoints nécessitent un token d'authentification.
 | Series | Privées — `series.user_id == user_id` |
 | Book | Public si `user_id IS NULL`, sinon `book.user_id == user_id` |
 | ManuscriptNode | Hérite du livre parent via la dépendance `get_book_for_user()` |
+| Asset | Hérite du livre parent via la dépendance `get_book_for_user()` ; l'`asset_id` est aussi vérifié dans la même requête SQL |
 
 L'authentification OIDC est optionnelle sur la plupart des routes (les livres publics restent accessibles sans token). Les endpoints `/spellcheck/` requièrent obligatoirement un token.
 

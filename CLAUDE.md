@@ -44,6 +44,7 @@ app/
 │   ├── database.py                 # Async SQLAlchemy engine, Base, get_db() dependency
 │   └── dependancies.py             # Shared dependencies: ChatConfig, EmbeddingConfig, get_book_for_user()
 ├── models/
+│   ├── asset.py                    # Asset ORM model (table: assets) — World Bible elements
 │   ├── book.py                     # Book ORM model (table: books)
 │   ├── manuscript_node.py          # ManuscriptNode ORM model (table: manuscript_nodes) — self-referential tree
 │   ├── manuscript_node_snapshot.py # ManuscriptNodeSnapshot ORM model (table: manuscript_node_snapshots)
@@ -52,6 +53,7 @@ app/
 │   ├── book_commit.py              # BookCommit ORM model (table: book_commits)
 │   └── user.py                     # User ORM model (table: users)
 ├── schemas/
+│   ├── asset.py                    # AssetCreate, AssetUpdate, AssetRead
 │   ├── book.py                     # BookCreate, BookUpdate, BookRead (includes manuscript_nodes list)
 │   ├── manuscript_node.py          # ManuscriptNodeCreate, ManuscriptNodeUpdate, ManuscriptNodeRead
 │   ├── series.py                   # SeriesCreate, SeriesUpdate, SeriesRead
@@ -61,6 +63,7 @@ app/
 │   └── user.py                     # UserRead
 ├── routers/
 │   ├── auth.py                     # POST /auth/login
+│   ├── assets.py                   # CRUD /books/{book_id}/assets/
 │   ├── books.py                    # CRUD /books/ + POST /{id}/vectorize + GET /{id}/query
 │   ├── manuscript_nodes.py         # CRUD /books/{book_id}/manuscript-nodes/
 │   ├── series.py                   # CRUD /series/
@@ -82,6 +85,7 @@ app/
 ```
 series          (user_id FK → users, optional)
   └── books     (user_id FK → users, series_id FK → series, parent_book_id FK → books)
+        ├── assets            (book_id FK → books) — World Bible elements
         ├── manuscript_nodes  (book_id FK → books, parent_front_id FK → manuscript_nodes.front_id — self-referential)
         ├── book_commits      (book_id FK → books)
         │     └── manuscript_node_snapshots  (commit_id FK → book_commits)
@@ -90,6 +94,15 @@ series          (user_id FK → users, optional)
 ```
 
 #### Key tables
+
+**assets** — World Bible elements scoped to a book.
+- `id` (UUID PK, `gen_random_uuid()`): client-facing identifier
+- `book_id` (int FK → books, CASCADE): owning book
+- `type` (enum): `CHARACTER`, `LOCATION`, `ITEM`, `FACTION`, `LORE`, `IMAGE` — indexed
+- `name` (string(255))
+- `aliases` (PostgreSQL `text[]`, default `{}`): alternative names / pseudonyms
+- `short_description` (TEXT, nullable)
+- `attributes` (JSONB, nullable): open-ended type-specific fields (e.g. `{"age": 35, "role": "antagonist"}`)
 
 **books** — No `content` field; content lives in manuscript nodes.
 - `series_id` (nullable FK → series): the saga this book belongs to
@@ -151,8 +164,11 @@ The chat service runs a multi-turn LangChain agentic loop (max 6 iterations). Ea
 | `search_book` | Regular | Semantic search over vectorized manuscript content |
 | `read_chapter` | Regular | Reads the full text of a node by UUID or title |
 | `list_chapters` | Regular | Returns the full table of contents (IDs + titles) |
+| `list_assets` | Regular | Returns a lightweight overview of World Bible assets (id, type, name, short_description); optional type filter |
+| `read_asset` | Regular | Returns full details of a World Bible asset (including `attributes` JSONB) by UUID |
 | `propose_node_edit` | **HITL** | Proposes replacing an existing node's content — pauses the agent |
 | `propose_new_node` | **HITL** | Proposes creating a new node — pauses the agent |
+| `ask_question` | **HITL** | Asks the user a clarifying question — pauses the agent |
 
 **HITL flow:**
 1. Agent calls `propose_node_edit` or `propose_new_node`
@@ -182,13 +198,16 @@ History reconstruction for `resume_stream` is trivial: query all `chat_events` o
 - [app/main.py](app/main.py) — FastAPI app entry point (lifespan + routers)
 - [app/core/auth.py](app/core/auth.py) — OIDC JWT validation with JWKS caching
 - [app/core/dependancies.py](app/core/dependancies.py) — `get_book_for_user()` (loads book + checks access), `ChatConfig`, `EmbeddingConfig`
+- [app/models/asset.py](app/models/asset.py) — `Asset` ORM model + `AssetType` enum; UUID PK, PostgreSQL `ARRAY` + `JSONB`
 - [app/models/book.py](app/models/book.py) — `Book` ORM model; relationship `manuscript_nodes` loaded via `selectin`
 - [app/models/manuscript_node.py](app/models/manuscript_node.py) — `ManuscriptNode` ORM model with self-referential `parent_front_id → front_id`
 - [app/models/conversation.py](app/models/conversation.py) — `Conversation` + `ChatEvent` ORM models
 - [app/models/series.py](app/models/series.py) — `Series` ORM model
+- [app/schemas/asset.py](app/schemas/asset.py) — `AssetCreate`, `AssetUpdate`, `AssetRead`
+- [app/routers/assets.py](app/routers/assets.py) — CRUD `/books/{book_id}/assets/`; `_get_asset_for_book()` enforces book-scoped access
 - [app/services/rag.py](app/services/rag.py) — `vectorize_book(book, config, nodes)` — chunking + ChromaDB ingestion
 - [app/services/chat.py](app/services/chat.py) — `stream_chat_with_book_history_agentic()`, `chat_with_book_history_agentic()` — agentic loop with real-time event persistence
-- [app/services/tools.py](app/services/tools.py) — `make_book_tools(book, db, embedding_config)` — LangChain tools for the agent
+- [app/services/tools.py](app/services/tools.py) — `make_book_tools(book, db, embedding_config)` — LangChain tools for the agent (includes `list_assets`, `read_asset`)
 - [app/services/book_commits.py](app/services/book_commits.py) — `create_commit()`, `restore_commit()` — snapshot-based versioning
 - [app/routers/chat.py](app/routers/chat.py) — conversation CRUD, agentic chat, HITL endpoints, timeline
 - [app/routers/book_commits.py](app/routers/book_commits.py) — commit CRUD + restore
@@ -201,6 +220,7 @@ History reconstruction for `resume_stream` is trivial: query all `chat_events` o
 | Series | `series.user_id == user_id` (always private) |
 | Book | `book.user_id is None` (public) OR `book.user_id == user_id` |
 | ManuscriptNode | inherits from book — via `get_book_for_user()` dependency; also checks `node.book_id == book_id` |
+| Asset | inherits from book — via `get_book_for_user()` dependency; `_get_asset_for_book()` checks both `asset_id` and `book_id` in a single query |
 
 The `get_book_for_user(book_id, sub, db)` dependency in `app/core/dependancies.py` centralizes book loading and access checks. All book/node routers use it via `Depends(get_book_for_user)`.
 
