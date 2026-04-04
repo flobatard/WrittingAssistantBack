@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -10,10 +11,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.auth import get_optional_user_sub, resolve_user_id
 from app.core.database import get_db
 from app.core.dependancies import EmbeddingConfig, get_book_for_user, get_embedding_config
+from app.core.s3 import delete_objects_by_prefix
 from app.models.book import Book
 from app.models.manuscript_node import ManuscriptNode
 from app.schemas.book import BookCreate, BookRead, BookUpdate, ChatRequest, ChatResponse, IaSettingsUpdate
 from app.services.rag import vectorize_book, query_book
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["books"])
 
@@ -78,6 +82,10 @@ async def delete_book(
     book: Book = Depends(get_book_for_user),
     db: AsyncSession = Depends(get_db),
 ):
+    try:
+        delete_objects_by_prefix(f"books/{book.id}/")
+    except Exception:
+        logger.warning("Failed to delete S3 folder for book %s", book.id, exc_info=True)
     await db.delete(book)
 
 
