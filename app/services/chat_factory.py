@@ -9,7 +9,7 @@ def _normalize_base_url(url: str | None) -> str | None:
     if not url:
         return None
     url = url.rstrip("/")
-    if url.endswith("/v1"):
+    if not url.endswith("/v1"):
         url = f"{url}/v1"
     return url
 
