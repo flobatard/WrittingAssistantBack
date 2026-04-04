@@ -1,4 +1,5 @@
 import asyncio
+import json
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -11,7 +12,7 @@ from app.core.database import get_db
 from app.core.dependancies import EmbeddingConfig, get_book_for_user, get_embedding_config
 from app.models.book import Book
 from app.models.manuscript_node import ManuscriptNode
-from app.schemas.book import BookCreate, BookRead, BookUpdate, ChatRequest, ChatResponse
+from app.schemas.book import BookCreate, BookRead, BookUpdate, ChatRequest, ChatResponse, IaSettingsUpdate
 from app.services.rag import vectorize_book, query_book
 
 router = APIRouter(tags=["books"])
@@ -78,6 +79,27 @@ async def delete_book(
     db: AsyncSession = Depends(get_db),
 ):
     await db.delete(book)
+
+
+@router.get("/{book_id}/ia-settings")
+async def get_ia_settings(
+    book: Book = Depends(get_book_for_user),
+):
+    return book.ia_settings or {}
+
+
+@router.put("/{book_id}/ia-settings")
+async def update_ia_settings(
+    payload: IaSettingsUpdate,
+    book: Book = Depends(get_book_for_user),
+    db: AsyncSession = Depends(get_db),
+):
+    if len(json.dumps(payload.ia_settings).encode()) > 1_000_000:
+        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="ia_settings payload exceeds 1 MB")
+    book.ia_settings = payload.ia_settings
+    await db.flush()
+    await db.refresh(book)
+    return book.ia_settings
 
 
 @router.post("/{book_id}/vectorize")

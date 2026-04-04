@@ -24,6 +24,10 @@ class BookUpdate(BaseModel):
     is_spinoff: Optional[bool] = None
 
 
+class IaSettingsUpdate(BaseModel):
+    ia_settings: dict
+
+
 class BookRead(BaseModel):
     model_config = {"from_attributes": True}
 
@@ -35,6 +39,7 @@ class BookRead(BaseModel):
     is_spinoff: bool
     title: str
     genre: Optional[str]
+    ia_settings: Optional[dict]
     embedding_model_used: Optional[str]
     last_vectorized_at: Optional[datetime]
     created_at: datetime

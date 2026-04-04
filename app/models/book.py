@@ -4,6 +4,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Optional
 
 from sqlalchemy import Boolean, DateTime, Float, ForeignKey, String, func
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -31,6 +32,7 @@ class Book(Base):
     is_spinoff: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     genre: Mapped[str] = mapped_column(String(255), nullable=True)
+    ia_settings: Mapped[dict] = mapped_column(JSONB, server_default="{}")
     embedding_model_used: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     last_vectorized_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
