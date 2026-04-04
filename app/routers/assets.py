@@ -1,16 +1,42 @@
+import logging
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
 from app.core.database import get_db
 from app.core.dependancies import get_book_for_user
+from app.core.s3 import delete_objects_by_prefix, generate_presigned_download_url, generate_presigned_upload_url
 from app.models.asset import Asset, AssetType
 from app.models.book import Book
-from app.schemas.asset import AssetCreate, AssetRead, AssetUpdate
+from app.schemas.asset import (
+    AssetCreate,
+    AssetRead,
+    AssetUpdate,
+    DownloadUrlRequest,
+    PresignedDownloadResponse,
+    PresignedUploadResponse,
+    UploadUrlRequest,
+)
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["assets"])
+
+ALLOWED_CONTENT_TYPES = {
+    "image/png",
+    "image/jpeg",
+    "image/webp",
+    "image/gif",
+    "image/svg+xml",
+    "application/pdf",
+}
+
+
+def _asset_prefix(book_id: int, asset_id: UUID) -> str:
+    return f"books/{book_id}/assets/{asset_id}/"
 
 
 async def _get_asset_for_book(book_id: int, asset_id: UUID, db: AsyncSession) -> Asset:
@@ -85,4 +111,66 @@ async def delete_asset(
     db: AsyncSession = Depends(get_db),
 ):
     asset = await _get_asset_for_book(book.id, asset_id, db)
+    try:
+        delete_objects_by_prefix(_asset_prefix(book.id, asset.id))
+    except Exception:
+        logger.warning("Failed to delete S3 folder for asset %s", asset.id, exc_info=True)
     await db.delete(asset)
+
+
+@router.post(
+    "/{book_id}/assets/{asset_id}/upload-url",
+    response_model=PresignedUploadResponse,
+)
+async def generate_upload_url(
+    asset_id: UUID,
+    payload: UploadUrlRequest,
+    book: Book = Depends(get_book_for_user),
+    db: AsyncSession = Depends(get_db),
+):
+    if payload.content_type not in ALLOWED_CONTENT_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Content type '{payload.content_type}' is not allowed. "
+            f"Allowed: {', '.join(sorted(ALLOWED_CONTENT_TYPES))}",
+        )
+
+    await _get_asset_for_book(book.id, asset_id, db)
+
+    object_key = f"{_asset_prefix(book.id, asset_id)}{payload.filename}"
+    settings = get_settings()
+    upload_url = generate_presigned_upload_url(object_key, payload.content_type)
+
+    return PresignedUploadResponse(
+        upload_url=upload_url,
+        object_key=object_key,
+        expires_in=settings.S3_PRESIGNED_EXPIRY,
+    )
+
+
+@router.post(
+    "/{book_id}/assets/{asset_id}/download-url",
+    response_model=PresignedDownloadResponse,
+)
+async def generate_download_url(
+    asset_id: UUID,
+    payload: DownloadUrlRequest,
+    book: Book = Depends(get_book_for_user),
+    db: AsyncSession = Depends(get_db),
+):
+    await _get_asset_for_book(book.id, asset_id, db)
+
+    expected_prefix = _asset_prefix(book.id, asset_id)
+    if not payload.object_key.startswith(expected_prefix):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Object key does not belong to this asset",
+        )
+
+    settings = get_settings()
+    download_url = generate_presigned_download_url(payload.object_key)
+
+    return PresignedDownloadResponse(
+        download_url=download_url,
+        expires_in=settings.S3_PRESIGNED_EXPIRY,
+    )

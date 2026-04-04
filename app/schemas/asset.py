@@ -36,3 +36,23 @@ class AssetRead(BaseModel):
     attributes: Optional[dict[str, Any]]
     created_at: datetime
     updated_at: datetime
+
+
+class UploadUrlRequest(BaseModel):
+    filename: str
+    content_type: str
+
+
+class PresignedUploadResponse(BaseModel):
+    upload_url: str
+    object_key: str
+    expires_in: int
+
+
+class DownloadUrlRequest(BaseModel):
+    object_key: str
+
+
+class PresignedDownloadResponse(BaseModel):
+    download_url: str
+    expires_in: int

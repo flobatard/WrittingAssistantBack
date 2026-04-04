@@ -28,3 +28,6 @@ python-jose[cryptography]>=3.3.0
 
 # HTTP
 httpx>=0.27.0
+
+# S3
+boto3>=1.35.0

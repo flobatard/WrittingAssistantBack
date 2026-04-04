@@ -24,6 +24,14 @@ class Settings(BaseSettings):
     LANGUAGETOOL_HOST: str = "localhost"
     LANGUAGETOOL_PORT: int = 8010
 
+    # S3 / MinIO
+    S3_ENDPOINT_URL: str = "http://localhost:9000"
+    S3_PUBLIC_URL: str = "http://localhost:9000"
+    S3_ACCESS_KEY: str = "minioadmin"
+    S3_SECRET_KEY: str = "minioadmin"
+    S3_BUCKET_NAME: str = "writing-assistant"
+    S3_PRESIGNED_EXPIRY: int = 3600
+
     OIDC_ISSUER_URL: str = "http://localhost:8080/realms/writting_assistant"
     # Optionnal
     OIDC_AUDIENCE: str = ""

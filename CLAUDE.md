@@ -29,9 +29,10 @@ pip install -r requirements.txt
 
 ## Architecture
 
-Two storage layers:
+Three storage layers:
 - **PostgreSQL** (via SQLAlchemy async + asyncpg): persists series, books, manuscript nodes, conversations, chat events, book commits and snapshots
 - **ChromaDB** (remote client): vector store for semantic search over manuscript content
+- **MinIO / S3** (via boto3): object storage for file uploads (images, PDFs) attached to assets
 
 ### Project structure
 
@@ -42,7 +43,8 @@ app/
 │   ├── auth.py                     # OIDC/JWT authentication (JWKS caching)
 │   ├── config.py                   # Pydantic Settings — reads from .env via lru_cache
 │   ├── database.py                 # Async SQLAlchemy engine, Base, get_db() dependency
-│   └── dependancies.py             # Shared dependencies: ChatConfig, EmbeddingConfig, get_book_for_user()
+│   ├── dependancies.py             # Shared dependencies: ChatConfig, EmbeddingConfig, get_book_for_user()
+│   └── s3.py                       # S3 client (boto3) + presigned URL helpers
 ├── models/
 │   ├── asset.py                    # Asset ORM model (table: assets) — World Bible elements
 │   ├── book.py                     # Book ORM model (table: books)
@@ -102,7 +104,7 @@ series          (user_id FK → users, optional)
 - `name` (string(255))
 - `aliases` (PostgreSQL `text[]`, default `{}`): alternative names / pseudonyms
 - `short_description` (TEXT, nullable)
-- `attributes` (JSONB, nullable): open-ended type-specific fields (e.g. `{"age": 35, "role": "antagonist"}`)
+- `attributes` (JSONB, nullable): open-ended type-specific fields (e.g. `{"age": 35, "role": "antagonist"}`). May contain S3 `object_key` references to uploaded files — managed by the frontend per asset type. Each asset has a dedicated S3 folder (`books/{book_id}/assets/{asset_id}/`) that is cleaned up on deletion.
 
 **books** — No `content` field; content lives in manuscript nodes.
 - `series_id` (nullable FK → series): the saga this book belongs to
@@ -198,13 +200,14 @@ History reconstruction for `resume_stream` is trivial: query all `chat_events` o
 - [app/main.py](app/main.py) — FastAPI app entry point (lifespan + routers)
 - [app/core/auth.py](app/core/auth.py) — OIDC JWT validation with JWKS caching
 - [app/core/dependancies.py](app/core/dependancies.py) — `get_book_for_user()` (loads book + checks access), `ChatConfig`, `EmbeddingConfig`
+- [app/core/s3.py](app/core/s3.py) — `get_s3_client()`, `generate_presigned_upload_url()`, `generate_presigned_download_url()`, `delete_object()`
 - [app/models/asset.py](app/models/asset.py) — `Asset` ORM model + `AssetType` enum; UUID PK, PostgreSQL `ARRAY` + `JSONB`
 - [app/models/book.py](app/models/book.py) — `Book` ORM model; relationship `manuscript_nodes` loaded via `selectin`
 - [app/models/manuscript_node.py](app/models/manuscript_node.py) — `ManuscriptNode` ORM model with self-referential `parent_front_id → front_id`
 - [app/models/conversation.py](app/models/conversation.py) — `Conversation` + `ChatEvent` ORM models
 - [app/models/series.py](app/models/series.py) — `Series` ORM model
 - [app/schemas/asset.py](app/schemas/asset.py) — `AssetCreate`, `AssetUpdate`, `AssetRead`
-- [app/routers/assets.py](app/routers/assets.py) — CRUD `/books/{book_id}/assets/`; `_get_asset_for_book()` enforces book-scoped access
+- [app/routers/assets.py](app/routers/assets.py) — CRUD `/books/{book_id}/assets/` + presigned upload/download URLs; `_get_asset_for_book()` enforces book-scoped access
 - [app/services/rag.py](app/services/rag.py) — `vectorize_book(book, config, nodes)` — chunking + ChromaDB ingestion
 - [app/services/chat.py](app/services/chat.py) — `stream_chat_with_book_history_agentic()`, `chat_with_book_history_agentic()` — agentic loop with real-time event persistence
 - [app/services/tools.py](app/services/tools.py) — `make_book_tools(book, db, embedding_config)` — LangChain tools for the agent (includes `list_assets`, `read_asset`)
@@ -262,6 +265,12 @@ All scripts read connection info from `DATABASE_URL` (via `app.core.config`).
 | `LANGUAGETOOL_PORT` | `8010` | LanguageTool port |
 | `APP_ENV` | `development` | Application environment (`development` enables dev router) |
 | `OIDC_ISSUER_URL` | `http://localhost:8080/realms/writting_assistant` | OIDC provider (Keycloak by default) |
+| `S3_ENDPOINT_URL` | `http://localhost:9000` | S3/MinIO API endpoint |
+| `S3_PUBLIC_URL` | `http://localhost:9000` | Public S3 URL for presigned URLs (browser-reachable) |
+| `S3_ACCESS_KEY` | `minioadmin` | S3 access key |
+| `S3_SECRET_KEY` | `minioadmin` | S3 secret key |
+| `S3_BUCKET_NAME` | `writing-assistant` | S3 bucket name |
+| `S3_PRESIGNED_EXPIRY` | `3600` | Presigned URL expiry (seconds) |
 | `OIDC_AUDIENCE` | *(optional)* | JWT audience claim |
 
 Copy `.env.example` to `.env` to configure locally.
