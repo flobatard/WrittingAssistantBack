@@ -65,17 +65,25 @@ def _content_to_str(content) -> str:
 
 def generate_conversation_title(
     question: str,
-    answer: str,
     chat_config: ChatConfig,
+    answer: str = "",
 ) -> str:
     try:
         llm = get_chat(chat_config)
-        prompt = (
-            "Based on the following question and answer from a conversation about a book, "
-            "generate a very short and concise title (maximum 8 words) that summarizes the topic.\n"
-            "Return ONLY the title, no punctuation at the end, no quotes.\n\n"
-            f"Question: {question}\nAnswer: {answer}"
-        )
+        if answer:
+            prompt = (
+                "Based on the following question and answer from a conversation about a book, "
+                "generate a very short and concise title (maximum 8 words) that summarizes the topic.\n"
+                "Return ONLY the title, no punctuation at the end, no quotes.\n\n"
+                f"Question: {question}\nAnswer: {answer}"
+            )
+        else:
+            prompt = (
+                "Based on the following question about a book, "
+                "generate a very short and concise title (maximum 8 words) that summarizes the topic.\n"
+                "Return ONLY the title, no punctuation at the end, no quotes.\n\n"
+                f"Question: {question}"
+            )
         response = llm.invoke([HumanMessage(content=prompt)])
         return response.content.strip()
     except Exception:

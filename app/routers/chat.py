@@ -149,14 +149,16 @@ async def create_conversation(
             detail="Book not vectorized yet. Call POST /books/{id}/vectorize first.",
         )
 
-    conversation = Conversation(book_id=book_id)
+    title = await asyncio.to_thread(generate_conversation_title, payload.question, chat_config)
+    conversation = Conversation(book_id=book_id, title=title)
     db.add(conversation)
     await db.flush()
     await db.refresh(conversation)
 
     user_event = ChatEvent(conversation_id=conversation.id, role="user", content=payload.question, status="done")
     db.add(user_event)
-    await db.flush()
+    await db.commit()
+    await db.refresh(conversation)
 
     lc_history = [SystemMessage(content=_AGENTIC_SYSTEM), HumanMessage(content=payload.question)]
 
@@ -165,8 +167,8 @@ async def create_conversation(
             conv_data = ConversationRead.model_validate(conversation).model_dump()
             conv_data["start_date"] = conv_data["start_date"].isoformat() if hasattr(conv_data["start_date"], "isoformat") else conv_data["start_date"]
             yield f"event: conversation\ndata: {json.dumps(conv_data)}\n\n"
+            yield f"event: conversation_title\ndata: {json.dumps({'title': title})}\n\n"
 
-            full_response = ""
             async for event in stream_chat_with_book_history_agentic(
                 book, lc_history, chat_config, embedding_config, db,
                 conversation_id=conversation.id,
@@ -174,14 +176,6 @@ async def create_conversation(
                 if event.startswith("event: human_in_the_loop"):
                     yield event
                     return
-                elif event.startswith("event: done"):
-                    done_data = json.loads(event.split("data: ", 1)[1])
-                    full_response = done_data.get("full_response", "")
-                    title = await asyncio.to_thread(generate_conversation_title, payload.question, full_response, chat_config)
-                    conversation.title = title
-                    await db.flush()
-                    yield f"event: conversation_title\ndata: {json.dumps({'title': title})}\n\n"
-                    yield event
                 else:
                     yield event
 
@@ -206,11 +200,6 @@ async def create_conversation(
         .limit(1)
     )
     final_event = final_event_result.scalar_one()
-
-    title = await asyncio.to_thread(generate_conversation_title, payload.question, result["answer"], chat_config)
-    conversation.title = title
-    await db.flush()
-    await db.refresh(conversation)
 
     return ConversationChatResponse(
         conversation=ConversationRead.model_validate(conversation),
