@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import get_settings
 from app.core.database import init_db
-from app.routers import auth, book_commits, books, chat, ia_settings, manuscript_nodes, series, spellcheck
+from app.routers import assets, auth, book_commits, books, chat, ia_settings, manuscript_nodes, series, spellcheck
 
 
 @asynccontextmanager
@@ -33,6 +33,7 @@ app.include_router(auth.router, prefix="/auth")
 app.include_router(series.router, prefix="/series")
 app.include_router(books.router, prefix="/books")
 app.include_router(manuscript_nodes.router, prefix="/books")
+app.include_router(assets.router, prefix="/books")
 app.include_router(book_commits.router, prefix="/books_commits")
 app.include_router(chat.router, prefix="/books/chat")
 app.include_router(spellcheck.router, prefix="/spellcheck")

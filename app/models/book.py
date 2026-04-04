@@ -9,6 +9,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.core.database import Base
 
 if TYPE_CHECKING:
+    from app.models.asset import Asset
     from app.models.book_commit import BookCommit
     from app.models.manuscript_node import ManuscriptNode
 
@@ -51,4 +52,11 @@ class Book(Base):
         cascade="all, delete-orphan",
         passive_deletes=True,
         order_by="BookCommit.created_at",
+    )
+    assets: Mapped[list["Asset"]] = relationship(  # noqa: F821
+        "Asset",
+        back_populates="book",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        order_by="Asset.name",
     )

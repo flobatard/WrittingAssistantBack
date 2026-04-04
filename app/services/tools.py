@@ -7,6 +7,7 @@ from sqlalchemy.orm import defer
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.dependancies import EmbeddingConfig
+from app.models.asset import Asset, AssetType
 from app.models.book import Book
 from app.models.manuscript_node import ManuscriptNode
 from app.services.rag import query_book
@@ -156,4 +157,52 @@ def make_book_tools(book: Book, db: AsyncSession, embedding_config: EmbeddingCon
         This pauses the agent until the user replies."""
         return "ask_question acknowledged – awaiting user answer."
 
-    return [search_book, read_chapter, list_chapters, propose_node_edit, propose_new_node, ask_question]
+    @tool
+    async def list_assets(asset_type: str | None = None) -> str:
+        """List all World Bible assets (characters, locations, items, factions, lore) for this book.
+        Returns id, type, name, and short_description for each entry.
+        Optionally filter by asset_type: CHARACTER, LOCATION, ITEM, FACTION, LORE, IMAGE.
+        Use this first to discover available assets before calling read_asset for full details."""
+        stmt = select(Asset).where(Asset.book_id == book.id)
+        if asset_type is not None:
+            try:
+                at = AssetType(asset_type.upper())
+                stmt = stmt.where(Asset.type == at)
+            except ValueError:
+                return f"Unknown asset_type '{asset_type}'. Valid values: {[e.value for e in AssetType]}"
+        result = await db.execute(stmt.order_by(Asset.type, Asset.name))
+        assets = result.scalars().all()
+        if not assets:
+            return "No assets found."
+        lines = [
+            f"[{a.type.value}] {a.name} (id: {a.id}) — {a.short_description or 'No description'}"
+            for a in assets
+        ]
+        return "\n".join(lines)
+
+    @tool
+    async def read_asset(asset_id: str) -> str:
+        """Read the full details of a World Bible asset, including all attributes.
+        Pass the exact UUID of the asset (get it from list_assets).
+        Returns type, name, aliases, short_description, and the full attributes object."""
+        try:
+            aid = _uuid.UUID(asset_id)
+        except ValueError:
+            return f"Invalid asset_id '{asset_id}'. Must be a valid UUID."
+        result = await db.execute(
+            select(Asset).where(
+                Asset.book_id == book.id,
+                Asset.id == aid,
+            )
+        )
+        asset = result.scalar_one_or_none()
+        if asset is None:
+            return f"No asset found with id '{asset_id}'."
+        return "\n".join([
+            f"[{asset.type.value}] {asset.name} (id: {asset.id})",
+            f"Aliases: {', '.join(asset.aliases) if asset.aliases else 'None'}",
+            f"Short description: {asset.short_description or 'None'}",
+            f"Attributes: {asset.attributes or {}}",
+        ])
+
+    return [search_book, read_chapter, list_chapters, propose_node_edit, propose_new_node, ask_question, list_assets, read_asset]
