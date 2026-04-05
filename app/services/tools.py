@@ -175,29 +175,40 @@ def make_book_tools(book: Book, db: AsyncSession, embedding_config: EmbeddingCon
         if not assets:
             return "No assets found."
         lines = [
-            f"[{a.type.value}] {a.name} (id: {a.id}) — {a.short_description or 'No description'}"
+            f"[{a.type.value}] {a.name} (id: {a.id})"
             for a in assets
         ]
         return "\n".join(lines)
 
     @tool
-    async def read_asset(asset_id: str) -> str:
+    async def read_asset(identifier: str) -> str:
         """Read the full details of a World Bible asset, including all attributes.
-        Pass the exact UUID of the asset (get it from list_assets).
+        Pass the exact UUID or the name of the asset (get it from list_assets).
         Returns type, name, aliases, short_description, and the full attributes object."""
+        asset = None
+        # Try UUID first
         try:
-            aid = _uuid.UUID(asset_id)
-        except ValueError:
-            return f"Invalid asset_id '{asset_id}'. Must be a valid UUID."
-        result = await db.execute(
-            select(Asset).where(
-                Asset.book_id == book.id,
-                Asset.id == aid,
+            aid = _uuid.UUID(identifier)
+            result = await db.execute(
+                select(Asset).where(
+                    Asset.book_id == book.id,
+                    Asset.id == aid,
+                )
             )
-        )
-        asset = result.scalar_one_or_none()
+            asset = result.scalar_one_or_none()
+        except ValueError:
+            pass
+        # Fallback: search by name (case-insensitive)
+        if not asset:
+            result = await db.execute(
+                select(Asset).where(
+                    Asset.book_id == book.id,
+                    Asset.name.ilike(f"%{identifier}%"),
+                )
+            )
+            asset = result.scalar_one_or_none()
         if asset is None:
-            return f"No asset found with id '{asset_id}'."
+            return f"No asset found matching '{identifier}'."
         return "\n".join([
             f"[{asset.type.value}] {asset.name} (id: {asset.id})",
             f"Aliases: {', '.join(asset.aliases) if asset.aliases else 'None'}",
