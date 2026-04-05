@@ -1,9 +1,40 @@
 from datetime import datetime
-from typing import Optional
+from typing import List, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.schemas.manuscript_node import ManuscriptNodeRead
+
+
+class BookAISettings(BaseModel):
+    preprompt: str = Field(
+        default="",
+        description="Instructions globales sur le rôle de l'IA.",
+    )
+    style_guidelines: str = Field(
+        default="",
+        description="Directives narratives et style d'écriture.",
+    )
+    temperature: float = Field(
+        default=0.7,
+        description="Niveau de créativité du modèle.",
+    )
+    top_k_rag: int = Field(
+        default=7,
+        description="Nombre de chunks à remonter lors d'une recherche vectorielle.",
+    )
+    enabled_tools: List[str] = Field(
+        default=[
+            "search_book", "read_chapter", "list_chapters",
+            "propose_node_edit", "propose_new_node", "ask_question",
+            "list_assets", "read_asset",
+        ],
+        description="Liste blanche des outils LangChain autorisés.",
+    )
+    hitl_strictness: str = Field(
+        default="strict",
+        description="Niveau d'autonomie ('strict' = validation systématique requise, 'copilot' = bypass autorisé).",
+    )
 
 
 class BookCreate(BaseModel):
@@ -25,7 +56,7 @@ class BookUpdate(BaseModel):
 
 
 class IaSettingsUpdate(BaseModel):
-    ia_settings: dict
+    ia_settings: BookAISettings
 
 
 class BookRead(BaseModel):
@@ -39,7 +70,7 @@ class BookRead(BaseModel):
     is_spinoff: bool
     title: str
     genre: Optional[str]
-    ia_settings: Optional[dict]
+    ia_settings: Optional[BookAISettings]
     embedding_model_used: Optional[str]
     last_vectorized_at: Optional[datetime]
     created_at: datetime

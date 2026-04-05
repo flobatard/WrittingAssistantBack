@@ -14,15 +14,16 @@ def _normalize_base_url(url: str | None) -> str | None:
     return url
 
 def get_chat(config: ChatConfig) -> BaseChatModel:
+    temp_kwargs = {"temperature": config.temperature} if config.temperature is not None else {}
     if (config.provider_type == "gemini"):
         return ChatGoogleGenerativeAI(
             model=config.model or "gemini-1.5-flash",
-            google_api_key=config.api_key
-            # Le SDK Google gère ses propres URLs, 
-            # mais tu peux passer 'client_options' si tu as un proxy spécifique.
+            google_api_key=config.api_key,
+            **temp_kwargs,
         )
     return ChatOpenAI(
         model=config.model or "gpt-4o",
         api_key=config.api_key or "ollama",
         base_url=_normalize_base_url(config.url) or None,
+        **temp_kwargs,
     )

@@ -10,18 +10,21 @@ from app.core.dependancies import EmbeddingConfig
 from app.models.asset import Asset, AssetType
 from app.models.book import Book
 from app.models.manuscript_node import ManuscriptNode
+from app.schemas.book import BookAISettings
 from app.services.rag import query_book
 
 
 def make_book_tools(book: Book, db: AsyncSession, embedding_config: EmbeddingConfig) -> list:
     """Return the list of LangChain tools scoped to a specific book."""
 
+    ai_settings = BookAISettings(**(book.ia_settings or {}))
+
     @tool
     def search_book(query: str) -> str:
         """Search the book content semantically. Use this to find specific mentions of a topic, character, or event.
         IMPORTANT: The results are short excerpts. If you find a relevant excerpt and need to understand the whole scene, 
         note the 'node_title' or 'id' from these results, and then use the `read_chapter` tool to read the full text."""
-        results = query_book(book, query, embedding_config, k=7)
+        results = query_book(book, query, embedding_config, k=ai_settings.top_k_rag)
         parts = []
         for r in results["results"]:
             parts.append(f"[{r['metadata']['node_title']}]\n{r['content']}")
@@ -216,4 +219,5 @@ def make_book_tools(book: Book, db: AsyncSession, embedding_config: EmbeddingCon
             f"Attributes: {asset.attributes or {}}",
         ])
 
-    return [search_book, read_chapter, list_chapters, propose_node_edit, propose_new_node, ask_question, list_assets, read_asset]
+    all_tools = [search_book, read_chapter, list_chapters, propose_node_edit, propose_new_node, ask_question, list_assets, read_asset]
+    return [t for t in all_tools if t.name in ai_settings.enabled_tools]

@@ -1,13 +1,15 @@
+import dataclasses
 import json
 from typing import AsyncGenerator
 
-from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, ToolMessage
+from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, SystemMessage, ToolMessage
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.services.tools import make_book_tools
 
 from app.core.dependancies import ChatConfig, EmbeddingConfig
 from app.models.book import Book
 from app.models.conversation import ChatEvent
+from app.schemas.book import BookAISettings
 from app.services.chat_factory import get_chat
 
 HITL_TOOLS = {"propose_new_node", "propose_node_edit", "ask_question"}
@@ -41,6 +43,17 @@ _AGENTIC_SYSTEM = (
 
     "IMPORTANT: Use the standard tool-calling format. Do not use XML tags like <tool_call> or </tool_call>. Generate your tool calls purely through the provided API structure."
 )
+
+
+def build_system_prompt(book: Book) -> str:
+    """Build a dynamic system prompt by appending book-specific AI settings."""
+    ai_settings = BookAISettings(**(book.ia_settings or {}))
+    parts = [_AGENTIC_SYSTEM]
+    if ai_settings.preprompt:
+        parts.append(f"\n\n=== AUTHOR INSTRUCTIONS ===\n{ai_settings.preprompt}")
+    if ai_settings.style_guidelines:
+        parts.append(f"\n\n=== STYLE GUIDELINES ===\n{ai_settings.style_guidelines}")
+    return "\n".join(parts)
 
 
 def _sse_event(event_type: str, data: dict) -> str:
@@ -99,11 +112,18 @@ async def stream_chat_with_book_history_agentic(
     conversation_id: int | None = None,
 ) -> AsyncGenerator[str, None]:
 
+    ai_settings = BookAISettings(**(book.ia_settings or {}))
+    effective_config = dataclasses.replace(
+        chat_config,
+        temperature=ai_settings.temperature,
+    )
+
     tools = make_book_tools(book, db, embedding_config)
-    llm = get_chat(chat_config).bind_tools(tools)
+    llm = get_chat(effective_config).bind_tools(tools)
     tools_by_name = {t.name: t for t in tools}
 
-    messages = lc_history
+    system_prompt = build_system_prompt(book)
+    messages = [SystemMessage(content=system_prompt)] + lc_history
     full_response = ""
     MAX_ITER = 6
 
@@ -215,11 +235,18 @@ async def chat_with_book_history_agentic(
     conversation_id: int | None = None,
 ) -> dict:
 
+    ai_settings = BookAISettings(**(book.ia_settings or {}))
+    effective_config = dataclasses.replace(
+        chat_config,
+        temperature=ai_settings.temperature,
+    )
+
     tools = make_book_tools(book, db, embedding_config)
-    llm = get_chat(chat_config).bind_tools(tools)
+    llm = get_chat(effective_config).bind_tools(tools)
     tools_by_name = {t.name: t for t in tools}
 
-    messages = lc_history
+    system_prompt = build_system_prompt(book)
+    messages = [SystemMessage(content=system_prompt)] + lc_history
     full_response = ""
     MAX_ITER = 6
 

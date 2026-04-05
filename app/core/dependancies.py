@@ -16,6 +16,7 @@ class ChatConfig:
     url: str | None
     model: str | None
     provider_type: str
+    temperature: float | None = None
 
 @dataclass
 class EmbeddingConfig:
