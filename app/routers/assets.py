@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
 from app.core.database import get_db
 from app.core.dependancies import get_book_for_user
-from app.core.s3 import delete_objects_by_prefix, generate_presigned_download_url, generate_presigned_upload_url
+from app.core.s3 import delete_object, delete_objects_by_prefix, generate_presigned_download_url, generate_presigned_upload_url
 from app.models.asset import Asset, AssetType
 from app.models.book import Book
 from app.schemas.asset import (
@@ -116,6 +116,28 @@ async def delete_asset(
     except Exception:
         logger.warning("Failed to delete S3 folder for asset %s", asset.id, exc_info=True)
     await db.delete(asset)
+
+
+@router.post(
+    "/{book_id}/assets/{asset_id}/delete-file",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def delete_asset_file(
+    asset_id: UUID,
+    payload: DownloadUrlRequest,
+    book: Book = Depends(get_book_for_user),
+    db: AsyncSession = Depends(get_db),
+):
+    await _get_asset_for_book(book.id, asset_id, db)
+
+    expected_prefix = _asset_prefix(book.id, asset_id)
+    if not payload.object_key.startswith(expected_prefix):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Object key does not belong to this asset",
+        )
+
+    delete_object(payload.object_key)
 
 
 @router.post(
