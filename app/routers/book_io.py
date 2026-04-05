@@ -1,5 +1,9 @@
+import uuid
+
 from fastapi import APIRouter, Depends, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.core.auth import get_optional_user_sub, resolve_user_id
 from app.core.database import get_db
@@ -16,7 +20,15 @@ router = APIRouter(tags=["book-io"])
 @router.get("/{book_id}/export", response_model=BookExport)
 async def export_book(
     book: Book = Depends(get_book_for_user),
+    db: AsyncSession = Depends(get_db),
 ):
+    # Eagerly load assets (not configured as selectin on the model)
+    result = await db.execute(
+        select(Book)
+        .where(Book.id == book.id)
+        .options(selectinload(Book.assets))
+    )
+    book = result.scalar_one()
     nodes = [
         NodeExport(
             front_id=n.front_id,
@@ -68,16 +80,18 @@ async def import_book(
     db.add(book)
     await db.flush()
 
-    # Create nodes in two passes: first those without parent, then those with parent.
-    # This ensures parent front_ids exist before children reference them.
+    # Remap front_ids to fresh UUIDs to avoid conflicts with existing nodes
+    front_id_map = {n.front_id: uuid.uuid4() for n in payload.manuscript_nodes}
+
     nodes_without_parent = [n for n in payload.manuscript_nodes if n.parent_front_id is None]
     nodes_with_parent = [n for n in payload.manuscript_nodes if n.parent_front_id is not None]
 
     for n in nodes_without_parent + nodes_with_parent:
+        new_parent = front_id_map.get(n.parent_front_id) if n.parent_front_id else None
         node = ManuscriptNode(
             book_id=book.id,
-            front_id=n.front_id,
-            parent_front_id=n.parent_front_id,
+            front_id=front_id_map[n.front_id],
+            parent_front_id=new_parent,
             node_type=n.node_type,
             title=n.title,
             content=n.content,
