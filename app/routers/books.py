@@ -102,9 +102,9 @@ async def update_ia_settings(
     book: Book = Depends(get_book_for_user),
     db: AsyncSession = Depends(get_db),
 ):
-    if len(json.dumps(payload.ia_settings).encode()) > 1_000_000:
+    if len(json.dumps(payload.ia_settings.model_dump()).encode()) > 1_000_000:
         raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="ia_settings payload exceeds 1 MB")
-    book.ia_settings = payload.ia_settings
+    book.ia_settings = payload.ia_settings.model_dump()
     await db.flush()
     await db.refresh(book)
     return book.ia_settings
