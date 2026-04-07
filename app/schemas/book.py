@@ -35,6 +35,10 @@ class BookAISettings(BaseModel):
         default="strict",
         description="Niveau d'autonomie ('strict' = validation systématique requise, 'copilot' = bypass autorisé).",
     )
+    formatting_instruction: str = Field(
+        default="",
+        description="Instruction de formattage sur les edite nodes etc.",
+    )
 
 
 class BookCreate(BaseModel):
