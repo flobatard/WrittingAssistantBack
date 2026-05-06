@@ -1,0 +1,162 @@
+# Template de workflow Gitea Actions : Build → Push → Deploy via docker compose
+#
+# À placer dans ton repo applicatif à : .gitea/workflows/deploy.yaml
+#
+# Secrets à configurer dans Gitea (Settings → Secrets and Variables → Actions) :
+#
+#   Registry :
+#     REGISTRY_USERNAME   → valeur de registry_username dans Ansible (défaut: admin)
+#     REGISTRY_PASSWORD   → valeur de vault_registry_password
+#
+#   Déploiement SSH :
+#     DEPLOY_HOST         → IP mesh du host cible (ex: 10.8.10.101)
+#     DEPLOY_USER         → user SSH (ex: batard)
+#     DEPLOY_SSH_KEY      → clé privée SSH (format PEM, multiline)
+#
+#   Application :
+#     ENV_VARIABLES       → contenu complet du fichier .env de l'application
+#                           (matérialisé sur le runner puis scp vers le host cible)
+#
+# Prérequis dans le repo :
+#   - Un Dockerfile à la racine (pour le build de l'image)
+#   - Un docker-compose.yml référençant l'image du registry, ex :
+#       services:
+#         app:
+#           image: registry.vpn.h.fbatard.fr/<owner>/<repo>:latest
+#           env_file: .env
+#
+# Pour plusieurs hosts cibles, voir la section "Multi-host" en bas de fichier.
+
+name: Build, Push and Deploy
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - fb_home
+
+env:
+  REGISTRY: registry.vpn.h.fbatard.fr # Ou votre registry selon votre nom de domaine
+  HOST: app-04.vpn.h.fbatard.fr
+  IMAGE_NAME: admin/writting-assistant-back
+  # Répertoire de déploiement sur le(s) host(s) cible(s)
+  DEPLOY_PATH: WrittingAssistantBack
+  SSH_USER: deploy
+  COMPOSE_FILE: docker-compose.prod.yml
+
+jobs:
+  # ─────────────────────────────────────────────
+  # Job 1 : Build de l'image et push vers le registry
+  # ─────────────────────────────────────────────
+  build-and-push:
+    # ARM-native runner (Pi target). Adjust the label to match your Gitea runner.
+    runs-on: [self-hosted, arm64]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Login to private registry
+        run: |
+          echo "${{ secrets.REGISTRY_PASSWORD }}" | \
+            docker login ${{ env.REGISTRY }} \
+              --username "${{ secrets.REGISTRY_USER }}" \
+              --password-stdin
+
+      - name: Build Docker image
+        run: |
+          docker build \
+            -t "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}" \
+            -t "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest" \
+            .
+
+      - name: Push Docker image
+        run: |
+          docker push "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}"
+          docker push "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest"
+
+      - name: Logout from registry
+        if: always()
+        run: docker logout ${{ env.REGISTRY }}
+
+  # ─────────────────────────────────────────────
+  # Job 2 : Déploiement sur le host cible via SSH
+  # ─────────────────────────────────────────────
+  deploy:
+    runs-on: ubuntu-latest
+    needs: build-and-push
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Create deploy directory on target host
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ env.HOST }}
+          username: ${{ env.SSH_USER }}
+          key: ${{ secrets.PRIVATE_SSH_KEY }}
+          script: mkdir -p ${{ env.DEPLOY_PATH }}
+
+      - name: Materialize .env from secret
+        env:
+          ENV_VARIABLES: ${{ secrets.ENV_VARIABLES }}
+        run: |
+          printf '%s' "$ENV_VARIABLES" > .env
+          chmod 600 .env
+
+      - name: Upload ${{ env.COMPOSE_FILE }} and .env
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ env.HOST }}
+          username: ${{ env.SSH_USER }}
+          key: ${{ secrets.PRIVATE_SSH_KEY }}
+          source: |
+            ${{ env.COMPOSE_FILE }}
+            .env
+          target: ${{ env.DEPLOY_PATH }}
+
+      - name: Pull images and restart services
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ env.HOST }}
+          username: ${{ env.SSH_USER }}
+          key: ${{ secrets.PRIVATE_SSH_KEY }}
+          script: |
+            set -e
+            cd ${{ env.DEPLOY_PATH }}
+
+            # Login sur le registry depuis le host cible
+            echo "${{ secrets.REGISTRY_PASSWORD }}" | \
+              docker login ${{ env.REGISTRY }} \
+                --username "${{ secrets.REGISTRY_USER }}" \
+                --password-stdin
+
+            docker compose -f ${{ env.COMPOSE_FILE }} pull
+            docker compose -f ${{ env.COMPOSE_FILE }} up -d --remove-orphans
+
+            docker logout ${{ env.REGISTRY }}
+
+# ─────────────────────────────────────────────
+# Multi-host : déployer sur plusieurs hosts en parallèle
+# ─────────────────────────────────────────────
+# Remplacer le job "deploy" ci-dessus par :
+#
+#   deploy:
+#     runs-on: ubuntu-latest
+#     needs: build-and-push
+#     strategy:
+#       matrix:
+#         include:
+#           - host_secret: DEPLOY_HOST_APP01   # secret contenant 10.8.10.101
+#           - host_secret: DEPLOY_HOST_APP02   # secret contenant 10.8.10.102
+#
+#     steps:
+#       - uses: actions/checkout@v4
+#       - name: Deploy to ${{ matrix.host_secret }}
+#         uses: appleboy/ssh-action@v1.0.3
+#         with:
+#           host: ${{ secrets[matrix.host_secret] }}
+#           ...
+#
+# Chaque host_secret doit être déclaré dans les secrets Gitea du repo.
