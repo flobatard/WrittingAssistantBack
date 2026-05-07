@@ -125,7 +125,7 @@ async def stream_chat_with_book_history_agentic(
     system_prompt = build_system_prompt(book)
     messages = [SystemMessage(content=system_prompt)] + lc_history
     full_response = ""
-    MAX_ITER = 6
+    MAX_ITER = 15
 
     for _ in range(MAX_ITER):
         accumulated: AIMessageChunk | None = None
